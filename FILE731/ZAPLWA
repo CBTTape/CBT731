@@ -1,0 +1,756 @@
+         TITLE 'Zap Fields in the Logon Work Area'
+*---------------------------------------------------------------------*
+*                                                                     *
+*  Program Title:  ZAPLWA                                             *
+*                                                                     *
+*  Function:       TSO/E Command to zap fields in the Logon Work      *
+*                  Area.  NOMAIL bit and NONOTICE bit.  Also          *
+*                  turns on and off the two RECONNECT bits.           *
+*                  Parm of L turns off Fullscreen LOGON.              *
+*                  Parm of P puts the password into the TSB.          *
+*                   (insecure, but allows the RELOGON program         *
+*                    to work as it was designed - CBT File 958)       *
+*                                                                     *
+*                  You must logoff and logon again for these          *
+*                  commands to take effect.                           *
+*                                                                     *
+*  Syntax  :       ZAPLWA M  - Turns on  NOMAIL bit                   *
+*                  ZAPLWA MF - Turns off NOMAIL bit                   *
+*                  ZAPLWA N  - Turns on  NONOTICES bit                *
+*                  ZAPLWA NF - Turns off NONOTICES bit                *
+*                  ZAPLWA R  - Turns on  RECONNECT bits               *
+*                  ZAPLWA RF - Turns off RECONNECT bits               *
+*                  ZAPLWA L  - Turns off Fullscreen LOGON             *
+*                  ZAPLWA LF - Turns on  Fullscreen LOGON             *
+*                  ZAPLWA P  - Put password in the TSB                *
+*                  ZAPLWA PF - Password not in the TSB                *
+*                                                                     *
+*  Possibilities:  This program provides a pattern to help you        *
+*                  change a selected few bits in the Logon Work       *
+*                  Area.  But it is the programmer's responsibility   *
+*                  to do this intelligently, because the LWA is a     *
+*                  very complicated control block, and many of the    *
+*                  fields in the LWA are transitory and don't last    *
+*                  long.  If you issue another LOGON from TSO READY   *
+*                  mode, you will reuse the same address space for    *
+*                  the new LOGON and many of the fields in the LWA    *
+*                  will most likely be preserved.                     *
+*                                                                     *
+*                  In other words, for these settings to take         *
+*                  effect, you should go out to TSO READY mode        *
+*                  and say LOGON sameuid, after issuing the ZAPLWA    *
+*                  command.                                           *
+*                                                                     *
+*  Level   :       1.1                                                *
+*                                                                     *
+*  Changes :       ZAPLWA P - puts password in the TSB (insecure)     *
+*                                                                     *
+*                                                                     *
+*                                                                     *
+*                                                                     *
+*                                                                     *
+*---------------------------------------------------------------------*
+         MACRO
+&NAME    HEX   &TO,&LEN,&FROM
+&NAME    STM   15,1,HEXSAVE
+         LA    1,&FROM
+         LA    0,&LEN
+         LA    15,&TO
+         BAL   9,HEX
+         LM    15,1,HEXSAVE
+         MEND
+         MACRO
+&LABEL   APUT  &MSG,                    @MESSAGE TEXT                  &
+               &LEN,                    @LENGTH OF MESSAGE             &
+               &RSA=,                   OPTIONAL 2 WORD SAVE AREA      &
+               &EPA=                    EPUTL EPA
+.*
+.* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+.*
+.*  --> E@PUT
+.*
+.*  THIS MACRO SETS UP A PARAMETERS AND INVOKES THE EPUTL ROUTINE.
+.*
+.*
+.*  ARGUMENTS: -----------------------------------------------------
+.*
+.*      &MSG : ADDRESS OF MESSAGE TEXT OR A LITERAL
+.*
+.*      &LEN : LENGTH OF MESSAGE TEXT (DEFAULT IS L'&MSG)
+.*
+.*      &RSA :(OPTIONAL) 1 WORD SAVE AREA TO PRESERVE R14 FOR TPUT
+.*            COMPATIBILITY.
+.*
+.*      &EPA :(OPTIONAL) EPA FOR EPUTL ROUTINE
+.*
+.*
+.*   EXAMPLES: -----------------------------------------------------
+.*
+.*      1) APUT  'LITERAL'
+.*
+.*      2) APUT  (R3),80
+.*
+.*      3) APUT  LABEL
+.*
+.*      4) APUT  LABEL,40
+.*
+.*
+.* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+.*
+.*
+.*  LOCAL SET SYMBOLS
+.*
+         LCLC  &SMA                     MESSAGE ADDRESS (REG)
+         LCLC  &SML                     MESSAGE LENGTH (REG)
+         LCLC  &SEP                     EPA (REGISTER)
+.*
+         LCLC  &L1,&L2,&L3              LOCAL LABELS
+.*
+&L1      SETC  'EP'.'&SYSNDX'.'L1'      LOCAL LABELS
+&L2      SETC  'EP'.'&SYSNDX'.'L2'      LOCAL LABELS
+&L3      SETC  'EP'.'&SYSNDX'.'L3'      LOCAL LABELS
+.*
+.*
+.*  MESSAGE ADDRESS
+.*
+         AIF   (T'&LABEL EQ 'O').A0500                      *HMD 11/86*
+.*                                                          *HMD 11/86*
+&LABEL   DS    0H                                           *HMD 11/86*
+.*                                                          *HMD 11/86*
+.A0500   ANOP                                               *HMD 11/86*
+         AIF   ('&MSG' NE '').A2000
+         MNOTE 8,'''&MSG='' MISSING / REQUIRED'
+         MEXIT
+.*
+.A2000   ANOP
+         AIF   ('&MSG'(1,1) NE '(').A2400
+&SMA     SETC  '&MSG'(2,K'&MSG-2)
+         LR    R1,&SMA                  @MESSAGE TEXT
+         AGO   .A2600
+.*
+.A2400   ANOP
+         AIF   ('&MSG'(1,1) NE '''').A2500
+         B     &L3                      BRANCH AROUND MESSAGE
+&L2      DC    C&MSG
+&L3      DS    0H
+         LA    R1,&L2                   @MESSAGE
+         AGO   .A2600
+.*
+.A2500   ANOP
+         LA    R1,&MSG                  @MESSAGE TEXT
+.A2600   ANOP
+.*
+.*  MESSAGE LENGTH
+.*
+         AIF   ('&LEN' NE '').A3000
+         AIF   ('&MSG'(1,1) NE '''').A2800
+         LA    R0,L'&L2                 MESSAGE LENGTH
+         AGO   .A3600
+.*
+.A2800   ANOP
+         AIF   ('&MSG'(1,1) EQ '(').A2900
+         LA    R0,L'&MSG                MESSAGE LENGTH
+         AGO   .A3600
+.*
+.A2900   ANOP
+         MNOTE 8,'''LEN'' MISSING / REQUIRED'
+         MEXIT
+.*
+.A3000   ANOP
+         AIF   ('&LEN'(1,1) NE '(').A3400
+&SML     SETC  '&LEN'(2,K'&LEN-2)
+         LR    R0,&SML                  MESSAGE LENGTH
+         AGO   .A3600
+.*
+.A3400   ANOP
+         LA    R0,&LEN                  MESSAGE LENGTH
+.A3600   ANOP
+.*
+.*  RSA
+.*
+         AIF   ('&RSA' EQ '').A4900
+         ST    R14,&RSA                 SAVE REGS 14
+.A4900   ANOP
+.*
+.*  ENTRY POINT
+.*
+         AIF   ('&EPA' NE '').A5000
+         L     R15,=V(EPUTL)            EPA
+         AGO   .A5600
+.*
+.A5000   AIF   ('&EPA'(1,1) NE '(').A5400
+&SEP     SETC  '&EPA'(2,K'&EPA-2)
+         LR    R15,&SEP                 EPA
+         AGO   .A5600
+.*
+.A5400   ANOP
+         L     R15,&EPA                 EPA
+.*
+.A5600   ANOP
+.*
+.*  CALL LINKAGE
+.*
+.ACALL   BALR  R14,R15                  CALL PUTLINE ROUTINE
+.*
+         AIF   ('&RSA' EQ '').A6900
+         L     R14,&RSA                 RESTORE R14
+.A6900   ANOP
+.*
+.AMEND   MEND
+ZAPLWA   CSECT
+ZAPLWA   AMODE 31
+ZAPLWA   RMODE ANY
+         B     BEGINN-*(,R15)
+         DC    AL1(16),CL16'ZAPLWA VER 1.1'
+         DC    CL16' &SYSDATE &SYSTIME '
+BEGINN   DS    0H
+BEGIN    STM   R14,R12,12(R13)     SAVE CALLER'S REGISTERS
+         LR    R12,R15             COPY BASE.
+         USING ZAPLWA,R12,R11,R10
+         LA    R11,4095(,R12)
+         LA    R11,1(,R11)
+         LA    R10,4095(,R11)
+         LA    R10,1(,R10)
+         LR    R14,R13             COPY CALLER'S SAVE AREA POINTER.
+         LA    R13,SAVE            POINT TO MY SAVE AREA.
+         ST    R13,8(,R14)         CHAIN ...
+         ST    R14,SAVE+4          ... SAVE AREAS.
+         LR    R4,R1               PRESERVE CPPL POINTER.
+         APUT  MESSAGET,L'MESSAGET     Title Message
+         APUT  MESSAGEU,L'MESSAGEU     Underline
+         LR    R1,R4               Restore CPPL Pointer
+PARMS    DS    0H
+         LTR   R1,R1               ANY CPPL OR PARM POINTER?
+         BZ    EOJ4                END WITH CODE 4
+         L     R2,0(,R1)           POINT TO BUFFER
+         LTR   R2,R2               ANY?
+         BZ    EOJ4                END WITH CODE 4
+         LH    R3,0(R2)            LOAD LENGTH.
+         LTR   R3,R3               ANY?
+         BZ    EOJ4                END WITH CODE 4
+         CLI   2(R2),X'00'         COMMAND PROCESSOR INVOCATION?
+         BE    RLDCP
+         LA    R2,2(,R2)           POINT TO PARM.
+         B     PARM
+RLDCP    DS    0H
+* This code is to test 1(R2) to make sure that it isn't garbage - below
+         LH    R6,2(,R2)           Load offset
+         LA    R6,5(,R6)           Point to exactly one letter length.
+         CR    R6,R3               Is this the command buffer length?
+         BNE   RLDCPX              No. Not exactly one letter
+         OI    FLAGZ,X'01'         Yes. Only one. Second letter garbage
+RLDCPX   DS    0H                  Now check if there are NO parms.
+         LH    R6,2(,R2)           Load offset
+         LA    R6,4(,R6)           No PARM ?
+         CR    R6,R3               None, flag that situation.
+         BNE   RLDCPY              There is a PARM.
+         OI    FLAGZ,X'02'         Flag that there's no PARM.
+RLDCPY   DS    0H
+* This code is to test 1(R2) to make sure that it isn't garbage - above
+         AH    R2,2(,R2)           POINT TO ...
+         LA    R2,4(,R2)           ... PARM.
+PARM     OI    0(R2),C' '          UPPERCASE.
+         OI    1(R2),C' '          UPPERCASE.
+* --- PARMS GOTTEN AT THIS POINT.  ARE WE TURNING ATTRIBUTES -------- *
+* --- GLOBALLY OFF, OR GLOBALLY ON ? -------------------------------- *
+SWOFF    DS    0H
+         TM    FLAGZ,X'01'         Is the second letter garbage?
+         BO    SWON                Yes. Then ignore it.
+         CLI   1(R2),C'F'          ARE WE TURNING ATTRIBUTES OFF?
+         BNE   SWON                NO. DEFAULT TO TURN THEM ON.
+         OI    FLAG2,FLAG2OFF      PUT THE PGM INTO "TURN OFF" MODE
+         B     SETFLAGS            GO SET ATTRIBUTE FLAGS
+SWON     OI    FLAG2,FLAG2ON       PUT THE PROGRAM INTO "TURN ON" MODE
+         TM    FLAG2,FLAG2OFF+FLAG2ON    IMPOSSIBLE - CAN'T BE BOTH
+         BNO   SETFLAGS            NO PROBLEM - TEST ATTRIBS
+         NI    FLAG2,255-FLAG2OFF  RESOLVE THE CONTRADICTION TO "ON"
+* ---
+SETFLAGS DS    0H
+NOMAIL   CLI   0(R2),C'M'          WE WANT NOMAIL ?
+         BNE   NONOTICE            NO. GO ON
+         OI    FLAGA,FLAGNMA       SET UP FOR NOMAIL
+         B     PROCESS
+NONOTICE CLI   0(R2),C'N'          WE WANT NONOTICE ?
+         BNE   RECONN              NO. GO ON
+         OI    FLAGB,FLAGNNO       SET UP FOR NONOTICE
+         B     PROCESS
+RECONN   CLI   0(R2),C'R'          WE WANT RECONNECT ?
+         BNE   FSLOGON             NO. GO ON
+         OI    FLAGC,FLAGREC       SET UP FOR NONOTICE
+         B     PROCESS
+FSLOGON  CLI   0(R2),C'L'          WE WANT NO FULL SCREEN LOGON ?
+         BNE   PASSTSB             NO. GO ON
+         OI    FLAGB,FLAGNFS       SET UP FOR NO FSLOGON
+         B     PROCESS
+PASSTSB  CLI   0(R2),C'P'          WE WANT PASSWORD IN THE TSB ?
+         BNE   TPUT001A            NO. GO ON
+         OI    FLAGB,FLAGPASS      SET UP FOR PASSWORD IN THE TSB
+         B     PROCESS
+TPUT001A DS    0H
+         BAL   R9,TPUT001
+         OI    FLAGZ,X'04'
+* --- FLAG CHOSEN, GET THE LWA. ------------------------------------- *
+PROCESS  DS    0H
+         L     R5,X'224'           POINT TO PSAAOLD
+         L     R5,X'6C'(,R5)       POINT TO ASXB
+         L     R5,X'14'(,R5)       POINT TO LWA
+         ST    R5,LWAADDR
+         USING LWA,R5
+         LA    R6,LWACTLS          LWA + X'40'
+         ST    R6,SAVFLG2
+         LA    R6,LWAFLGS          LWA + X'38'
+         ST    R6,SAVFLG1
+         LA    R7,LWAFLAG1         RECONNECT BYTE, LWA + X'1C0'
+         ST    R7,SAVER7A
+         LA    R5,LWACTLS+1        LWA + X'41'  (ZAP THIS FIRST)
+         ST    R5,SAVER5A          SAVE IT FOR LATER RELOADING
+         DROP  R5
+* --- WE'RE IN THE LWA.  NOW DO IT. --------------------------------- *
+         MVC   SAVEFLGB(2),0(R5)
+         TM    FLAGZ,X'02'
+         BO    RGETOUT
+         TM    FLAGZ,X'04'
+         BZ    DOIT
+RGETOUT  BAL   R9,RESULTS
+         B     EOJ4
+* --- FIRST, DETERMINE IF WE'RE TURNING STUFF OFF OR ON. ------------ *
+DOIT     DS    0H
+         TM    FLAG2,FLAG2ON
+         BO    ON
+         TM    FLAG2,FLAG2OFF
+         BO    OFF
+         BAL   R9,RESULTS              NO FLAG, NO CHANGE.
+         B     EOJ4
+* --- WE'RE TURNING STUFF ON. --------------------------------------- *
+ON       DS    0H
+         L     R7,SAVER7A
+         L     R6,SAVFLG1
+         L     R5,SAVER5A
+* --- >
+         STM   R15,R1,SAVE1401     Now save registers and test if APF
+         XR    R15,R15                  authorized.
+         TESTAUTH FCTN=1           Are we authorized?
+         LTR   R15,R15             Test the return code.
+         BZ    OFFAUTH0            Not zero, tell not authorized.
+         LM    R15,R1,SAVE1401     Restore registers used by TESTAUTH.
+         B     NOTAUTH
+OFFAUTH0 DS    0H
+* --- >
+KZ       MODESET KEY=ZERO
+         TM    FLAGA,FLAGNMA
+         BNO   NONOTON
+         OI    0(R5),FLAGNMA        ZAP ON NOMAIL
+         B     ONEND
+NONOTON  TM    FLAGB,FLAGNNO
+         BNO   NORECON
+         OI    1(R5),FLAGNNO        ZAP ON NONOTICE
+         B     ONEND
+NORECON  TM    FLAGC,FLAGREC
+         BNO   NOFLOGON
+         OI    0(R7),FLAGREC        ZAP ON RECONNECT, BOTH BITS
+         B     ONEND
+NOFLOGON TM    FLAGB,FLAGNFS
+         BNO   PASSTSBO
+         OI    1(R5),FLAGNFS        ZAP ON NO FULLSCREEN LOGON
+         NI    1(R6),255-FLAGNFSA
+         B     ONEND
+PASSTSBO TM    FLAGB,FLAGPASS
+         BNO   ONEND
+         OI    1(R5),FLAGPASS       ZAP ON PASSWORD IN TSB
+         B     ONEND
+ONEND    DS    0H
+NZ       MODESET KEY=NZERO
+         BAL   R9,RESULTS
+         B     EOJ0
+* --- WE'RE TURNING STUFF OFF. -------------------------------------- *
+OFF      DS    0H
+         L     R7,SAVER7A
+         L     R6,SAVFLG1
+         L     R5,SAVER5A
+* --- >
+         STM   R15,R1,SAVE1401     Now save registers and test if APF
+         XR    R15,R15                  authorized.
+         TESTAUTH FCTN=1           Are we authorized?
+         LTR   R15,R15             Test the return code.
+         BZ    OFFAUTH1            Not zero, tell not authorized.
+         LM    R15,R1,SAVE1401     Restore registers used by TESTAUTH.
+         B     NOTAUTH
+OFFAUTH1 DS    0H
+* --- >
+KZF      MODESET KEY=ZERO
+         TM    FLAGA,FLAGNMA
+         BNO   NONOTOF
+         NI    0(R5),255-FLAGNMA
+         B     OFFEND
+NONOTOF  TM    FLAGB,FLAGNNO
+         BNO   NONOREC
+         NI    1(R5),255-FLAGNNO
+         B     OFFEND
+NONOREC  TM    FLAGC,FLAGREC
+         BNO   NONOFSL
+         NI    0(R7),255-FLAGREC
+         B     OFFEND
+NONOFSL  TM    FLAGB,FLAGNFS
+         BNO   PASSTSBF
+         NI    1(R5),255-FLAGNFS
+         OI    1(R6),FLAGNFSA
+         B     OFFEND
+PASSTSBF TM    FLAGB,FLAGPASS
+         BNO   OFFEND
+         NI    1(R5),255-FLAGPASS
+         B     OFFEND
+OFFEND   DS    0H
+NZF      MODESET KEY=NZERO
+         BAL   R9,RESULTS
+         B     EOJ0
+* --- RESULTS ------------------------------------------------------- *
+RESULTS  DS    0H
+         ST    R9,SAVER9A
+         MVC   OUTLINE,OUTLINE-1
+         MVC   OUTLINE(15),=C'LWA Address :  '
+         HEX   OUTLINE+17,4,LWAADDR
+         APUT  OUTLINE,30
+         MVC   SAVEFLGA(2),0(R5)
+         MVC   OUTLINE,OUTLINE-1
+         MVC   OUTLINE(15),=C'Flags Before:  '
+         HEX   OUTLINE+17,1,SAVEFLGB
+         HEX   OUTLINE+20,1,SAVEFLGB+1
+         APUT  OUTLINE,25
+         MVC   OUTLINE,OUTLINE-1
+         MVC   OUTLINE(15),=C'Flag Changed:  '
+         HEX   OUTLINE+17,1,FLAGA
+         HEX   OUTLINE+20,1,FLAGA+1
+         APUT  OUTLINE,25
+         MVC   OUTLINE,OUTLINE-1
+         MVC   OUTLINE(15),=C'Flags After :  '
+         HEX   OUTLINE+17,1,SAVEFLGA
+         HEX   OUTLINE+20,1,SAVEFLGA+1
+         APUT  OUTLINE,25
+         MVC   OUTLINE,OUTLINE-1
+         MVC   OUTLINE(15),=C'Recon After :  '
+         HEX   OUTLINE+17,1,0(R7)
+         APUT  OUTLINE,25
+         L     R6,SAVFLG1
+         MVC   DISPFLG1,0(R6)
+         MVC   OUTLINE,OUTLINE-1
+         MVC   OUTLINE(15),=C'LWA + X''38'' :  '
+         HEX   OUTLINE+17,1,DISPFLG1
+         HEX   OUTLINE+20,1,DISPFLG1+1
+         HEX   OUTLINE+23,1,DISPFLG1+2
+         HEX   OUTLINE+26,1,DISPFLG1+3
+         APUT  OUTLINE,30
+         L     R6,SAVFLG2
+         MVC   DISPFLG2,0(R6)
+         MVC   OUTLINE,OUTLINE-1
+         MVC   OUTLINE(15),=C'LWA + X''40'' :  '
+         HEX   OUTLINE+17,1,DISPFLG2
+         HEX   OUTLINE+20,1,DISPFLG2+1
+         HEX   OUTLINE+23,1,DISPFLG2+2
+         HEX   OUTLINE+26,1,DISPFLG2+3
+         APUT  OUTLINE,30
+         L     R9,SAVER9A
+         BR    R9
+* ------------------------------------------------------------------- *
+TPUT001  DS    0H
+         ST    R9,SAVER9B
+         APUT  MESS001,38
+         APUT  MESS0A1,38
+         APUT  MESS0A2,38
+         APUT  MESS0A3,38
+         APUT  MESS0A4,38
+         APUT  MESS0A5,38
+         APUT  MESS0A6,38
+         APUT  MESS0A7,38
+         APUT  MESS0A8,38
+         APUT  MESS0A9,38
+         APUT  MESS0AA,38
+         L     R9,SAVER9B
+         BR    R9
+* ------------------------------------------------------------------- *
+NOTAUTH  DS    0H
+         APUT  MESS000,38
+         B     EOJ4
+* ------------------------------------------------------------------- *
+* --- ALL THE EOJ'S. ------------------------------------------------ *
+EOJ0     SR    R15,R15             SET CC = 0.
+         B     EOJ                 CONT.
+EOJ4     LA    R15,4               SET CC = 4.
+         B     EOJ
+EOJ8     LA    R15,8               SET CC = 8.
+         B     EOJ                 CONT
+EOJ      DS    0H                  BYE.
+         L     R13,SAVE+4
+         ST    R15,16(,R13)        PUT RC INTO PASSED SAVE AREA
+         L     R14,12(,R13)
+         LM    R0,R12,20(R13)
+         BR    R14
+         LTORG
+* --- MESSAGE AREA ------------------------------- BELOW ------------ *
+         DS    0D
+MESSAGET DC    CL43'ZAPLWA - ZAP fields in the Logon Work Area '
+MESSAGEU DC    CL43'------ - --- ------ -- --- ----- ---- ---- '
+MESS000  DC    CL38'Command must be run APF Authorized.   '
+MESS001  DC    CL38'Appropriate First Letters:  M,N,R,L.  '
+MESS0A1  DC    CL38'ZAPLWA M  - Turns on  NOMAIL bit      '
+MESS0A2  DC    CL38'ZAPLWA MF - Turns off NOMAIL bit      '
+MESS0A3  DC    CL38'ZAPLWA N  - Turns on  NONOTICES bit   '
+MESS0A4  DC    CL38'ZAPLWA NF - Turns off NONOTICES bit   '
+MESS0A5  DC    CL38'ZAPLWA R  - Turns on  RECONNECT bits  '
+MESS0A6  DC    CL38'ZAPLWA RF - Turns off RECONNECT bits  '
+MESS0A7  DC    CL38'ZAPLWA L  - Turns off Fullscreen LOGON'
+MESS0A8  DC    CL38'ZAPLWA LF - Turns on  Fullscreen LOGON'
+MESS0A9  DC    CL38'ZAPLWA P  - Put password in the TSB   '
+MESS0AA  DC    CL38'ZAPLWA PF - Password not in the TSB   '
+* --- MESSAGE AREA ------------------------------- ABOVE ------------ *
+SAVEFLGB DC    X'0000'
+SAVEFLGA DC    X'0000'
+SAVEFLGX DC    X'0000'
+SAVER3A  DC    F'0'
+SAVER5A  DC    F'0'
+SAVER6A  DC    F'0'
+SAVER6B  DC    F'0'
+SAVER7A  DC    F'0'
+SAVER9A  DC    F'0'
+SAVER9B  DC    F'0'
+SAVER9C  DC    F'0'
+SAVFLG1  DC    F'0'
+SAVFLG2  DC    F'0'
+LWAADDR  DC    F'0'
+SAVE1401 DS    4F
+DISPFLG1 DC    XL4'00000000'
+DISPFLG2 DC    XL4'00000000'
+*  ------  keep together  -  below
+FLAGA    DC    X'00'
+FLAGB    DC    X'00'
+FLAGC    DC    X'00'
+*  ------  keep together  -  above
+FLAGNMA  EQU   B'00000001'         NOMAIL
+FLAGNNO  EQU   B'10000000'         NONOTICES
+FLAGNFS  EQU   B'00100000'         NO FULLSCREEN LOGON
+FLAGNFSA EQU   B'00000010'         NO FULLSCREEN LOGON
+FLAGPASS EQU   B'00010000'         PASSWORD IN TSB
+FLAGREC  EQU   B'00110000'         RECONNECT
+FLAG2    DC    X'00'
+FLAG2ON  EQU   X'01'
+FLAG2OFF EQU   X'02'
+FLAGZ    DC    X'00'
+SAVE     DS    9D
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+         DC    C' '
+OUTLINE  DS    CL80
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+HEX      MVC   1(1,R15),0(R1)      MOVE BYTE
+         UNPK  0(3,R15),1(2,R15)   UNPACK
+         TR    0(2,R15),HEXTAB-240
+         LA    R15,2(,R15)         INCREMENT OUTPUT PTR
+         LA    R1,1(,R1)           INCREMENT INPUT PTR
+         BCT   R0,HEX              DECREMENT LENGTH, THEN LOOP
+         MVI   0(R15),C' '         BLANK THE TRAILING BYTE
+         BR    R9                  RETURN TO CALLER
+HEXTAB   DC    C'0123456789ABCDEF' TRANSLATE TABLE
+HEXSAVE  DS    3F                  SAVE FOR HEX MACRO
+         SPACE
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+         IKJEFLWA
+         YREGS
+         END
+EPUTL    TITLE 'PUTLINE FOR FEWER THAN 83 ARGUMENTS IN THE KEY OF C MAJ&
+               OR'
+EPUTL    CSECT                                              *HMD 10/85*
+         LCLB  &XA                                          *HMD 10/85*
+&XA      SETB  1                  SET TO ZERO ON NON/XA     *HMD 10/85*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+*
+*  MODULE NAME  . . . . EPUTL
+*
+*  ALIASES  . . . . . . NONE
+*
+*  DATE WRITTEN . . . . 06/85
+*  UPDATED      . . . . 04/88                                  HD APR88
+*
+*  AUTHOR . . . . . . . JIM ELSWORTH
+*  UPDATOR  . . . . . . HOWARD M. DEAN                         HD APR88
+*
+*  ENVIRONMENT  . . . . TSO COMMAND-PROCESSOR
+*
+*  PURPOSE:
+*    ALLOW AN EASY INTERFACE TO PUTLINE ROUTINE
+*
+*
+*  DESCRIPTION:
+*    BUILDS PUTLINE PARAMETER LIST BASED ON INPUT ARGUMENTS.
+*    ISSUES SINGLE LINE PUTLINE.
+*
+*
+*  ATTRIBUTES:
+*    REENTRANT
+*
+*  FEATURES:
+*    WILL RUN UNDER BATCH TMP SINCE PUTLINE USED INSTEAD OF TPUT.
+*
+*  CALLED MODULES:
+*    PUTLINE
+*
+*  ASSUMPTIONS:
+*    CALLED BY A TSO-CP THAT IS OBSERVING STANDARD LINKAGE
+*
+*  ABENDS:
+*    POSSIBLE 0CX IF BAD ARGUEMNTS
+*
+*  CAVEATS:
+*    UNPREDICTABLE RESULTS IF FIRST PROGRAM RUNNING UNDER THIS TCB
+*    DID NOT SAVE (14,12) BEFOR R1 WAS MODIFIED.
+*
+*
+*  INPUT ARGUMENTS:
+*    1)  R1 : ADDRESS OF MESSAGE TEXT
+*    2)  R0 : LENGTH OF MESSAGE TEXT
+*    3) R13 : STANDARD OS SAVE AREA
+*    4) R14 : RETURN ADDRESS
+*    5) R15 : ENTRY ADDRESS
+*
+*               ( CONTINUED ... )
+*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+         EJECT
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+*
+*
+*  OUTPUT ARGUMENT: RETURN CODE FROM PUTLINE OR
+*
+RCBA     EQU   100                 BAD MESSAGE ADDRESS
+RCBL     EQU   104                 MESSAGE LENGTH <1 OR >MAXMSG
+*
+MAXMSG   EQU   128                 MAXIMUM MESSAGE LENGTH
+*
+*
+*  REGISTERS USED:
+*
+R0       EQU   0                   MESSAGE LENGTH AT ENTRY
+R1       EQU   1                   MESSAGE ADDRESS AT ENTRY
+R2       EQU   2                   WORK
+RMA      EQU   4                   @MESSAGE TEXT
+RML      EQU   5                   MESSAGE LENGTH
+RUPT     EQU   6                   @UPT (USER PROFILE TABLE)
+RECT     EQU   7                   @ECT
+R12      EQU   12                  CSECT BASE
+R13      EQU   13                  @SAVE AREA AND DYNAMIC WORK AREA
+R14      EQU   14                  WORK/LINKAGE
+R15      EQU   15                  WORK/LINKAGE
+*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+         EJECT
+         IKJCPPL
+         EJECT
+         IKJTCB   LIST=YES                                  *HMD 10/85*
+         EJECT                                              *HMD 10/85*
+         CVT      DSECT=YES,LIST=YES                        *HMD 10/85*
+         EJECT
+         IHAPSA   LIST=YES                                     HD APR88
+         EJECT                                                 HD APR88
+PUTLDS   DSECT
+         DS    18F                      OS SAVE AREA
+PUTAAA   EQU   *
+PUTECB   DS    F                        ECB
+PUTIOPL  DS    4F                       IOPLADS
+PUTBLOK  PUTLINE MF=L
+PUTLEN   DS    H                        LENGTH
+PUTZZZ   DS    H                        RESERVED
+PUTMSG   DS    (MAXMSG)C                MESSAGE TEXT AREA
+PUTSIZE  EQU   *-PUTLDS                 SIZE OF PUTLINE PARMS
+         EJECT
+***********************************************************************
+*  SET UP LINKAGE
+***********************************************************************
+         SPACE 1
+EPUTL    CSECT
+         AIF  (NOT &XA).X001                                *HMD 10/85*
+EPUTL    AMODE 31
+.X001    ANOP                                               *HMD 10/85*
+         STM   14,12,12(13)       SAVE CALLERS REGS
+         LR    R12,R15            COPY EPA
+         USING EPUTL,R12          ADDRESSABILITY
+         AIF   (NOT &XA).X002                               *HMD 10/85*
+         GETMAIN RU,              LV=LENGTH                            &
+               LV=PUTSIZE,        STANDARD OS SA PLUS ANY EXTRA        &
+               LOC=RES            RELATIVE TO 16MB LINE
+         AGO   .X003                                        *HMD 10/85*
+.X002    ANOP                                               *HMD 10/85*
+         GETMAIN RU,              LV=LENGTH                            &
+               LV=PUTSIZE         STANDARD OS SA PLUS ANY EXTRA
+.X003    ANOP                                               *HMD 10/85*
+         ST    1,8(13)            OUR SAVE AREA POINTER
+         ST    13,4(1)            POINTER TO CALLERS SAVE AREA
+         LR    13,1               @OUR SAVE AREA
+         USING PUTLDS,R13         MAP SA AND WORK AREA
+         L     R14,4(R13)         POINT TO CALLERS RSA
+         LM    R0,R1,20(R14)      RESTORE REGS CHANGED BY GETMAIN
+         SPACE 2
+***********************************************************************
+*  UNLOAD ARGUMENTS AND VALIDATE WHERE POSSIBLE
+***********************************************************************
+         SPACE 1
+         LA    R15,RCBA                 ASSUME BAD ADDRESS
+         LTR   RMA,R1                   MESSAGE ADDRESS
+         BNP   RETURN                   GOOD ASSUMPTION
+         LA    R15,RCBL                 ASSUME BAD LENGTH
+         LTR   RML,R0                   POSITIVE?
+         BNP   RETURN                   -NO
+         C     RML,=A(MAXMSG)           MORE THAN MAX?
+         BH    RETURN                   -YES
+         SPACE 2
+***********************************************************************
+*  BUILD PARAMETER LIST
+***********************************************************************
+         SPACE 1
+         LA    R15,4(RML)               MESSAGE LENGTH
+         STH   R15,PUTLEN                 PLUS HEADER
+         XC    PUTZZZ,PUTZZZ            CLEAR 2ND HWORD OF RDW
+         BCTR  RML,0                    REDUCE FOR MOVE
+         EX    RML,PUTMOVE
+         EJECT
+***********************************************************************
+*  DIG UP ADDRESS OF UPT AND ECT
+***********************************************************************
+         SPACE 1
+         L     R2,PSATOLD-PSA           @TCB                   HD APR88
+         L     R2,TCBFSA-TCB(R2)        @1ST PROBLEM PGM SAVE AREA
+         L     R2,24(R2)                REG1 THAT WAS PASSED TO CP
+         USING CPPL,R2                  MAP CPPL
+         L     RUPT,CPPLUPT             @UPT
+         L     RECT,CPPLECT             @ECT
+         SPACE 2
+***********************************************************************
+*  ISSUE PUTLINE CALL
+***********************************************************************
+         SPACE 1
+         XC    PUTECB,PUTECB            CLEAR ECB
+         XC    PUTBLOK(12),PUTBLOK      CLEAR PARM BLOCK       HD APR88
+         PUTLINE PARM=PUTBLOK,          PARAMETER BLOCK                &
+               UPT=(RUPT),              @UPT                           &
+               ECT=(RECT),              @ECT                           &
+               ECB=PUTECB,              @ECB                           &
+               OUTPUT=(PUTLEN,TERM,SINGLE,DATA),                       &
+               MF=(E,PUTIOPL)
+         EJECT
+***********************************************************************
+*  RETURN TO CALLER
+***********************************************************************
+         SPACE 1
+RETURN   EQU   *
+         LR    2,R13                    @OUR SAVE AREA
+         LR    3,R15                    SAVE RETURN CODE
+         L     R13,4(R13)               @CALLERS SAVE AREA
+         FREEMAIN RU,LV=PUTSIZE,A=(R2),SP=0
+         LR    R15,3                    RESTORE RC
+         RETURN (14,12),RC=(15)         RESTORE CALLERS REGS
+         SPACE 5
+***********************************************************************
+*  CONSTANTS AND NON-REENTRANT WORK AREAS
+***********************************************************************
+         SPACE 1
+PUTMOVE  MVC   PUTMSG(*-*),0(RMA)       MOVE MESSAGE TO BUFFER
+         SPACE 2
+         LTORG
+         SPACE 2
+         END   EPUTL

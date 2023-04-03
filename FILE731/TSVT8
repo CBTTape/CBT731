@@ -1,0 +1,657 @@
+TSVT8    TITLE 'SWITCH ON/OFF 8-CHARACTER USERID SUPPORT z/OS 2.3'
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*   GENERAL 8-CHARACTER USERID SUPPORT IS CONTROLLED BY THE         *
+*    SWITCH IN THE TSVT (TSO VECTOR TABLE) PLUS BYTE +6.            *
+*                                                                   *
+*   THIS PROGRAM IS IN THE PUBLIC DOMAIN.                           *
+*                                                                   *
+*   This support was first deployed in z/OS 2.3.                    *
+*                                                                   *
+*   IN PREVIOUS SYSTEMS, THIS BYTE WAS X'00'  (Reserved)            *
+*   IN CURRENT SYSTEMS, IF THE BYTE IS X'07' THEN 8-CHAR USERID     *
+*     SUPPORT IS OFF.                                               *
+*   IN CURRENT SYSTEMS, IF THE BYTE IS X'08' THEN 8-CHAR USERID     *
+*     SUPPORT IS ON.                                                *
+*                                                                   *
+*   EVIDENTLY, TPVT+X'4D' WAS ALTERED FROM A RESERVED BYTE TO       *
+*     HAVE TO BE IN SYNC WITH TSVT+6.  CHANGES HAVE BEEN MADE       *
+*     TO THIS PROGRAM TO ALTER BOTH OF THEM AT THE SAME TIME.       *
+*     IT SEEMS THAT TSVT+6 IS THE MAIN SWITCH.  IF TPVT+4D          *
+*     IS DIFFERENT, IT DOESN'T SEEM TO TURN OFF OR ON SUPPORT.      *
+*     (8-CHARACTER USERID SUPPORT IN Z/OS 2.3 AND HIGHER.)          *
+*                                                                   *
+*   The TSO developer told me the following:                        *
+*                                                                   *
+*   "The two values should be in sync.  The TPVT denotes the        *
+*   current parmlib setting in place, and the TSVT is the           *
+*   current system setting.  The TSVT is also used in synching      *
+*   multiple systems in a Plex."                                    *
+*                                                                   *
+*   He also told me the following information, regarding z/OS 2.4.  *
+*                                                                   *
+*   "The processing has not changed between releases.  There is     *
+*   no switch that activates this support.  The byte you are        *
+*   referring to denotes the maximum length of a userid allowed     *
+*   to be specified at LOGON (or when using the TSO parse macros    *
+*   that support 8 character IDs).  This allows a user who is       *
+*   currently logged on as an 8 character user to still process     *
+*   correctly if the maximum is downgraded during their session."   *
+*                                                                   *
+*   THIS PROGRAM FLIPS THE SWITCH TO ANY OF THESE VALUES.           *
+*                                                                   *
+*   SYNTAX:     TSVT8 0      SETS THE SWITCH TO X'00'               *
+*               TSVT8 7      SETS THE SWITCH TO X'07'               *
+*               TSVT8 8      SETS THE SWITCH TO X'08'               *
+*                                                                   *
+*   PURPOSE:    TO TURN 8-CHARACTER USERID SUPPORT ON OR OFF        *
+*               FOR TESTING PURPOSES.                               *
+*                                                                   *
+*   ATTRIBUTES:    NON-REENTRANT                                    *
+*                  APF-AUTHORIZED                                   *
+*                                                                   *
+*   CHANGES:                                                        *
+*      V1.1  - 07/20/2017 - Display the address of the switch byte  *
+*                 which is the TSVT + X'6'.                         *
+*      V2.0  - 12/13/2018 - Keep the TPVT+X'4D' byte in sync  TPVT-1*
+*                 with the TSVT + X'6' byte.                  TPVT-1*
+*                 Report status of both bytes.                TPVT-1*
+*      V2.1  - 09/04/2022 - Indicate which byte actually makesTPVT-2*
+*                 changes, and which byte just shows status.  TPVT-2*
+*                 Add PUTLINE support.                        TPVT-2*
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+* ------------------------------------------------------------------- *
+         MACRO
+&LABEL   APUT  &MSG,                    @MESSAGE TEXT                  &
+               &LEN,                    @LENGTH OF MESSAGE             &
+               &RSA=,                   OPTIONAL 2 WORD SAVE AREA      &
+               &EPA=                    EPUTL EPA
+.*
+.* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+.*
+.*  --> E@PUT
+.*
+.*  THIS MACRO SETS UP A PARAMETERS AND INVOKES THE EPUTL ROUTINE.
+.*
+.*
+.*  ARGUMENTS: -----------------------------------------------------
+.*
+.*      &MSG : ADDRESS OF MESSAGE TEXT OR A LITERAL
+.*
+.*      &LEN : LENGTH OF MESSAGE TEXT (DEFAULT IS L'&MSG)
+.*
+.*      &RSA :(OPTIONAL) 1 WORD SAVE AREA TO PRESERVE R14 FOR TPUT
+.*            COMPATIBILITY.
+.*
+.*      &EPA :(OPTIONAL) EPA FOR EPUTL ROUTINE
+.*
+.*
+.*   EXAMPLES: -----------------------------------------------------
+.*
+.*      1) APUT  'LITERAL'
+.*
+.*      2) APUT  (R3),80
+.*
+.*      3) APUT  LABEL
+.*
+.*      4) APUT  LABEL,40
+.*
+.*
+.* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+.*
+.*
+.*  LOCAL SET SYMBOLS
+.*
+         LCLC  &SMA                     MESSAGE ADDRESS (REG)
+         LCLC  &SML                     MESSAGE LENGTH (REG)
+         LCLC  &SEP                     EPA (REGISTER)
+.*
+         LCLC  &L1,&L2,&L3              LOCAL LABELS
+.*
+&L1      SETC  'EP'.'&SYSNDX'.'L1'      LOCAL LABELS
+&L2      SETC  'EP'.'&SYSNDX'.'L2'      LOCAL LABELS
+&L3      SETC  'EP'.'&SYSNDX'.'L3'      LOCAL LABELS
+.*
+.*
+.*  MESSAGE ADDRESS
+.*
+         AIF   (T'&LABEL EQ 'O').A0500                      *HMD 11/86*
+.*                                                          *HMD 11/86*
+&LABEL   DS    0H                                           *HMD 11/86*
+.*                                                          *HMD 11/86*
+.A0500   ANOP                                               *HMD 11/86*
+         AIF   ('&MSG' NE '').A2000
+         MNOTE 8,'''&MSG='' MISSING / REQUIRED'
+         MEXIT
+.*
+.A2000   ANOP
+         AIF   ('&MSG'(1,1) NE '(').A2400
+&SMA     SETC  '&MSG'(2,K'&MSG-2)
+         LR    R1,&SMA                  @MESSAGE TEXT
+         AGO   .A2600
+.*
+.A2400   ANOP
+         AIF   ('&MSG'(1,1) NE '''').A2500
+         B     &L3                      BRANCH AROUND MESSAGE
+&L2      DC    C&MSG
+&L3      DS    0H
+         LA    R1,&L2                   @MESSAGE
+         AGO   .A2600
+.*
+.A2500   ANOP
+         LA    R1,&MSG                  @MESSAGE TEXT
+.A2600   ANOP
+.*
+.*  MESSAGE LENGTH
+.*
+         AIF   ('&LEN' NE '').A3000
+         AIF   ('&MSG'(1,1) NE '''').A2800
+         LA    R0,L'&L2                 MESSAGE LENGTH
+         AGO   .A3600
+.*
+.A2800   ANOP
+         AIF   ('&MSG'(1,1) EQ '(').A2900
+         LA    R0,L'&MSG                MESSAGE LENGTH
+         AGO   .A3600
+.*
+.A2900   ANOP
+         MNOTE 8,'''LEN'' MISSING / REQUIRED'
+         MEXIT
+.*
+.A3000   ANOP
+         AIF   ('&LEN'(1,1) NE '(').A3400
+&SML     SETC  '&LEN'(2,K'&LEN-2)
+         LR    R0,&SML                  MESSAGE LENGTH
+         AGO   .A3600
+.*
+.A3400   ANOP
+         LA    R0,&LEN                  MESSAGE LENGTH
+.A3600   ANOP
+.*
+.*  RSA
+.*
+         AIF   ('&RSA' EQ '').A4900
+         ST    R14,&RSA                 SAVE REGS 14
+.A4900   ANOP
+.*
+.*  ENTRY POINT
+.*
+         AIF   ('&EPA' NE '').A5000
+         L     R15,VEPUTL               EPA
+         AGO   .A5600
+.*
+.A5000   AIF   ('&EPA'(1,1) NE '(').A5400
+&SEP     SETC  '&EPA'(2,K'&EPA-2)
+         LR    R15,&SEP                 EPA
+         AGO   .A5600
+.*
+.A5400   ANOP
+         L     R15,&EPA                 EPA
+.*
+.A5600   ANOP
+.*
+.*  CALL LINKAGE
+.*
+.ACALL   BALR  R14,R15                  CALL PUTLINE ROUTINE
+.*
+         AIF   ('&RSA' EQ '').A6900
+         L     R14,&RSA                 RESTORE R14
+.A6900   ANOP
+.*
+.AMEND   MEND
+* ------------------------------------------------------------------- *
+*  -----------------------------------------------------------------  *
+*                  MACRO TO DISPLAY HEX VALUES                        *
+*  -----------------------------------------------------------------  *
+         MACRO
+&NAME    HEX   &TO,&LEN,&FROM
+&NAME    STM   R15,R1,HEXSAVE
+         LA    R1,&FROM
+         LA    R0,&LEN
+         LA    R15,&TO
+         BAL   R4,HEX
+         LM    R15,R1,HEXSAVE
+         MEND
+*  -----------------------------------------------------------------  *
+         YREGS
+TSVT8    CSECT
+TSVT8    AMODE 31
+TSVT8    RMODE 24
+         USING TSVT8,R15           (ESTABLISH TEMPORARY BASE).
+         B     BEGIN               SKIP OVER HEADER.
+EYEC0    DC    AL1(EYECL)          EXCLUSIVE LENGTH OF HEADER.
+EYEC     DC    C' TSVT8 - &SYSDATE - &SYSTIME -'
+         DC    C'  VERSION  2.1  '                               TPVT-2
+         DC    CL16' Public Domain '
+EYECL    EQU   *-EYEC
+         DROP  R15                 (DROP TEMPORARY BASE).
+BEGIN    STM   R14,R12,12(R13)     SAVE CALLER'S REGISTERS
+         LR    R12,R15             COPY BASE.
+         USING TSVT8,R12           (TELL ASSEMBLER).
+         LR    R14,R13             COPY CALLER'S SAVE AREA POINTER.
+         MVC   SAVE,SAVEACON       PRE-CLEAR SAVE AREA
+         LA    R13,SAVE            POINT TO MY SAVE AREA.
+         ST    R13,8(,R14)         CHAIN ...
+         ST    R14,SAVE+4          ... SAVE AREAS.
+*
+INITCON  DS    0H                  CLEAR FLAGS INITIALLY
+         MVI   FLAG1,X'00'         CLEAR FLAG
+         XC    TSVTNEW,TSVTNEW     CLEAR
+         XC    TPVTNEW,TPVTNEW     CLEAR                         TPVT-1
+         XC    TSVTPL6,TSVTPL6     CLEAR
+         XC    TPVTPL4D,TPVTPL4D   CLEAR                         TPVT-1
+         MVI   OUTPUT-1,X'40'      CLEAR
+         MVC   OUTPUT,OUTPUT-1      OUTPUT LINE
+         B     TESTPARM
+VEPUTL   DC    V(EPUTL)
+*
+TESTPARM DS    0H
+         LTR   R1,R1               ANY CPPL OR PARM POINTER?
+         BZ    RETURN              B IF NOT.
+         L     R2,0(,R1)           POINT TO BUFFER
+         LTR   R2,R2               ANY?
+         BZ    RETURN              B IF NOT.
+         LH    R3,0(R2)            LOAD LENGTH.
+         LTR   R3,R3               ANY?
+         BZ    RETURN              B IF NOT.
+         CLI   2(R2),X'00'         COMMAND PROCESSOR INVOCATION?
+         BE    RLDCP
+         LA    R2,2(,R2)           POINT TO PARM.
+         B     PARM
+RLDCP    CH    R3,=H'4'            ANY PARM?
+         BE    FINDDATA            B IF NOT.
+         AH    R2,2(,R2)           POINT TO ...
+         LA    R2,4(,R2)           ... PARM.
+PARM     DS    0H
+* --- PARMS GOTTEN AT THIS POINT.  NOW WE ARE FLIPPING THE SWITCH --- *
+*
+PRTTITL  DS    0H                  PRINT PROGRAM TITLE
+         STM   R14,R1,SAVE14T1
+         APUT  TITLINE,L'TITLINE
+         APUT  TITDASH,L'TITDASH
+         LM    R14,R1,SAVE14T1
+*
+SETFLAGS DS    0H
+         XC    FLAG1,FLAG1         INITIALIZE FLAG INDICATOR
+OLDPRM0  CLI   0(R2),C'0'          IS THE PARM C'0' ?
+         BNE   NEWBUT7             NO. GO ON
+         OI    FLAG1,FLAG0OLD      INDICATE WE WANT X'00'
+         B     FINDDATA
+NEWBUT7  CLI   0(R2),C'7'          IS THE PARM C'7' ?
+         BNE   NEWAND8             NO. GO ON
+         OI    FLAG1,FLAG7NEW      INDICATE WE WANT X'07'
+         B     FINDDATA
+NEWAND8  CLI   0(R2),C'8'          IS THE PARM C'8' ?
+         BNE   FINDDATA            NO. GO ON
+         OI    FLAG1,FLAG8NEW      INDICATE WE WANT X'08'
+         B     FINDDATA
+* --- FLAG CHOSEN, GET THE TSVT. ------------------------------------ *
+         USING CVTMAP,R5
+FINDDATA L     R5,CVTPTR           POINT TO THE CVT.
+         L     R5,CVTTVT           POINT TO TSVT.
+         ST    R5,SAVETSVT         SAVE ADDRESS OF TSVT
+         L     R6,X'4C'(,R5)       GET TPVT                      TPVT-1
+         ST    R6,SAVETPVT         SAVE ADDRESS OF TPVT          TPVT-1
+         A     R6,=F'77'           NEW LOCATION AT X'4D' OF TPVT TPVT-1
+         MVC   TPVTPL4D(1),0(R6)   STORE CURRENT SETTING         TPVT-1
+         ST    R6,DISPTP4D         STORE FOR DISPLAY AND REUSE   TPVT-1
+         XR    R6,R6               CLEAR REG TO REUSE IT         TPVT-1
+         LR    R6,R5               Get TSVT + 6 for display
+         A     R6,=F'6'            Add the 6 bytes
+         ST    R6,DISPADDR         Store for display
+         MVC   OUTPUT,OUTPUT-1     Clear output line.
+         MVC   OUTPUT(20),=C'Address of TSVT+6:  '   Move text.
+         HEX   OUTPUT+20,4,DISPADDR                  Address.
+         APUT  OUTPUT,60
+         MVC   OUTPUT,OUTPUT-1     Clear output line.            TPVT-1
+         MVC   OUTPUT(20),=C'Address of TPVT+4D: '   Move text.  TPVT-1
+         HEX   OUTPUT+20,4,DISPTP4D                  Address.    TPVT-1
+         APUT  OUTPUT,60                                         TPVT-1
+         MVC   TSVTPL6(1),6(R5)    STORE CURRENT SWITCH SETTING
+         DROP  R5
+* ------------------------------------------------------------------- *
+*                                  Show previous status of byte.
+         STM   R14,R1,SAVE14T1
+         MVC   OUTPUT,OUTPUT-1     Clear output line.            TPVT-2
+         APUT  OUTPUT,65           Print a blank line            TPVT-2
+         MVC   OUTPUT,OUTPUT-1     Clear output line.
+         MVC   OUTPUT(30),=C'Previous TSVT+6 setting was:  '
+         HEX   OUTPUT+32,1,6(R5)   Print original byte setting.
+*        HEX   OUTPUT+40,1,TSVTPL6   Print original byte setting.
+         MVC   OUTPUT+37(24),=C'This is the real switch.'        TPVT-2
+         APUT  OUTPUT,65                                         TPVT-2
+         L     R6,DISPTP4D                                       TPVT-1
+         MVC   OUTPUT,OUTPUT-1     Clear output line.            TPVT-1
+         MVC   OUTPUT(30),=C'Previous TPVT+4D setting was: '     TPVT-1
+         HEX   OUTPUT+32,1,0(R6)   Print original byte setting.  TPVT-1
+*        HEX   OUTPUT+40,1,TPVTPL4D  Print original byte setting.TPVT-1
+         MVC   OUTPUT+37(26),=C'Just a status indicator.  '      TPVT-2
+         APUT  OUTPUT,66                                         TPVT-2
+         MVC   OUTPUT,OUTPUT-1     Clear output line.            TPVT-2
+         MVC   OUTPUT+37(26),=C'Keep in sync with TSVT+6. '      TPVT-2
+         APUT  OUTPUT,66                                         TPVT-2
+         LM    R14,R1,SAVE14T1
+* --- HOW ARE WE SETTING THE SWITCH? -------------------------------- *
+ON       DS    0H                  Invalid parm entered.
+         CLI   FLAG1,X'00'         Didn't change the flag?
+         BE    NOCHANGE            Then show no change and get out.
+* -- >       Test if this command is being run APF Authorized
+         STM   R15,R1,SAVE14T1     Now save registers and test if APF
+         XR    R15,R15                  authorized.
+         TESTAUTH FCTN=1           Are we authorized?
+         LTR   R15,R15             Test the return code.
+         BNZ   NOTAUTH             Not zero, tell not authorized.
+         LM    R15,R1,SAVE14T1     Restore registers used by TESTAUTH.
+* -- >                             We're authorized. Go Key 0.
+         MODESET KEY=ZERO
+SETOLDWY DS    0H
+         MVI   6(R5),X'00'         Initially clear the switch byte.
+         MVI   0(R6),X'00'                                       TPVT-1
+         TM    FLAG1,FLAG0OLD      Are we resetting it to X'00'?
+         BNO   SETNEW7             No. Try next parm.
+         MVI   6(R5),X'00'         Move X'00' to the switch byte.
+         MVI   TSVTNEW,X'00'       Save the new setting.
+         MVI   0(R6),X'00'                                       TPVT-1
+         MVI   TPVTNEW,X'00'       Save the new setting.         TPVT-1
+         B     ENDMOD              Go problem state.
+SETNEW7  TM    FLAG1,FLAG7NEW      Do we want to set X'07'?
+         BNO   SETNEW8             No. Try next parm.
+         OI    6(R5),X'07'         Yes. Move X'07' to switch byte.
+         MVI   TSVTNEW,X'07'       Save the new setting.
+         OI    0(R6),X'07'         Yes. Move X'07' to switch.    TPVT-1
+         MVI   TPVTNEW,X'07'       Save the new setting.         TPVT-1
+         B     ENDMOD              Go problem state.
+SETNEW8  TM    FLAG1,FLAG8NEW      Do we want to set X'08'?
+         BNO   ENDMOD              No. Not resetting at all.
+         OI    6(R5),X'08'         Set switch byte to X'08'.
+         MVI   TSVTNEW,X'08'       Save the new setting.
+         OI    0(R6),X'08'         Set switch byte to X'08'.     TPVT-1
+         MVI   TPVTNEW,X'08'       Save the new setting.         TPVT-1
+         B     ENDMOD              Problem state.
+ENDMOD   DS    0H
+         MODESET KEY=NZERO
+         MVI   0(R2),X'00'         Make sure this parm address is
+         MVI   1(R2),X'00'           clean for next use.
+NEWTSVT  DS    0H                  Print new status of switch byte.
+         STM   R14,R1,SAVE14T1
+         MVC   OUTPUT,OUTPUT-1     Clear output line.
+         MVC   OUTPUT(30),=C'Changed  TSVT+6 setting is :  '
+         HEX   OUTPUT+32,1,6(R5)   Print changed byte setting.
+*        HEX   OUTPUT+40,1,TSVTNEW Print changed byte setting.
+         MVC   OUTPUT+37(24),=C'This is the real switch.'        TPVT-2
+         APUT  OUTPUT,65                                         TPVT-2
+*                                                                TPVT-1
+         MVC   OUTPUT,OUTPUT-1     Clear output line.            TPVT-1
+         MVC   OUTPUT(30),=C'Changed  TPVT+4D setting is:  '     TPVT-1
+         HEX   OUTPUT+32,1,0(R6)   Print changed byte setting.   TPVT-1
+*        HEX   OUTPUT+40,1,TPVTNEW Print changed byte setting.   TPVT-1
+         MVC   OUTPUT+37(26),=C'Just a status indicator.  '      TPVT-2
+         APUT  OUTPUT,66                                         TPVT-2
+         MVC   OUTPUT,OUTPUT-1     Clear output line.            TPVT-2
+         MVC   OUTPUT+37(26),=C'Keep in sync with TSVT+6. '      TPVT-2
+         APUT  OUTPUT,66                                         TPVT-2
+         LM    R14,R1,SAVE14T1
+RETURN0  SR    R15,R15             RC = 0
+RETURN   L     R13,SAVE+4          General return to caller.
+         L     R14,12(,R13)
+         LM    R0,R12,20(R13)
+         BR    R14
+         LTORG
+** ---------------------------------------------------------------- **
+NOTAUTH  DS    0H                  Message that we are not authorized
+         APUT  MSG00,L'MSG00
+         LA    R15,8               RC = 8
+         B     RETURN
+** ---------------------------------------------------------------- **
+NOCHANGE DS    0H                  Message that nothing changed.
+         APUT  MSG01,L'MSG01
+         APUT  MSG02,L'MSG02                                     TPVT-1
+         LA    R15,4               RC = 4
+         B     RETURN
+** ---------------------------------------------------------------- **
+HEX      DS    0H
+         MVC   1(1,R15),0(R1)      MOVE BYTE
+         UNPK  0(3,R15),1(2,R15)   UNPACK
+         TR    0(2,R15),HEXTAB-240
+         LA    R15,2(,R15)         INCREMENT OUTPUT PTR
+         LA    R1,1(,R1)           INCREMENT INPUT PTR
+         BCT   R0,HEX              DECREMENT LENGTH, THEN LOOP
+         MVI   0(R15),C' '         BLANK THE TRAILING BYTE
+         BR    R4                  RETURN TO CALLER
+HEXTAB   DC    C'0123456789ABCDEF' TRANSLATE TABLE
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*                           CONSTANTS                               *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+SAVEACON DC    16F'0'
+TITLINE  DC   C'TSVT8  TEST/ALTER 8-CHARACTER ID SUPPORT - V2.1' TPVT-2
+TITDASH  DC    C'-----  ---------- ----------- -- -------   ----'
+MSG00    DC    C'Program must be run APF-Authorized.'
+MSG01    DC    C'No changes have been made to TSVT+6 '           TPVT-1
+MSG02    DC    C'No changes have been made to TPVT+4D'           TPVT-1
+FLAG1    DC    X'00'
+FLAG0OLD EQU   B'10000000'             X'00'
+FLAG7NEW EQU   B'01000000'             X'07'
+FLAG8NEW EQU   B'00100000'             X'08'
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*                           VARIABLES                               *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+SAVE     DS    9D
+HEXSAVE  DS    3F                  SAVE FOR HEX MACRO
+SAVETSVT DS    F
+SAVETPVT DS    F                                                 TPVT-1
+DISPADDR DS    F
+DISPTP4D DS    F                                                 TPVT-1
+TSVTPL6  DS    X                   PREVIOUS SETTING              TPVT-1
+TPVTPL4D DS    X                   PREVIOUS SETTING              TPVT-1
+TSVTNEW  DS    X
+TPVTNEW  DS    X                                                 TPVT-1
+SAVE14T1 DS    2D                  Save "system-used" registers.
+         DC    C' '                Blank before OUTPUT line.
+OUTPUT   DC    CL80'  '            Variable output line.
+SAVELEN  EQU   *-SAVE
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+         TITLE '- MAPPING MACROS.'
+         CVT   DSECT=YES           MAP THE CVT.
+         END   TSVT8
+EPUTL    TITLE 'PUTLINE FOR FEWER THAN 83 ARGUMENTS IN THE KEY OF C MAJ&
+               OR'
+EPUTL    CSECT                                              *HMD 10/85*
+         LCLB  &XA                                          *HMD 10/85*
+&XA      SETB  1                  SET TO ZERO ON NON/XA     *HMD 10/85*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+*
+*  MODULE NAME  . . . . EPUTL
+*
+*  ALIASES  . . . . . . NONE
+*
+*  DATE WRITTEN . . . . 06/85
+*  UPDATED      . . . . 04/88                                  HD APR88
+*  CLEANED A BIT  . . . 08/17
+*
+*  AUTHOR . . . . . . . JIM ELSWORTH
+*  UPDATER  . . . . . . HOWARD M. DEAN                         HD APR88
+*
+*  ENVIRONMENT  . . . . TSO COMMAND PROCESSOR
+*
+*  PURPOSE:
+*    ALLOW AN EASY INTERFACE TO PUTLINE ROUTINE
+*
+*
+*  DESCRIPTION:
+*    BUILDS PUTLINE PARAMETER LIST BASED ON INPUT ARGUMENTS.
+*    ISSUES SINGLE LINE PUTLINE.
+*
+*
+*  ATTRIBUTES:
+*    REENTRANT
+*
+*  FEATURES:
+*    WILL RUN UNDER BATCH TMP SINCE PUTLINE USED INSTEAD OF TPUT.
+*
+*  CALLED MODULES:
+*    PUTLINE
+*
+*  ASSUMPTIONS:
+*    CALLED BY A TSO-CP THAT IS OBSERVING STANDARD LINKAGE
+*
+*  ABENDS:
+*    POSSIBLE 0CX IF BAD ARGUMENTS
+*
+*  CAVEATS:
+*    UNPREDICTABLE RESULTS IF FIRST PROGRAM RUNNING UNDER THIS TCB
+*    DID NOT SAVE (14,12) BEFORE R1 WAS MODIFIED.
+*
+*
+*  INPUT ARGUMENTS:
+*    1)  R1 : ADDRESS OF MESSAGE TEXT
+*    2)  R0 : LENGTH OF MESSAGE TEXT
+*    3) R13 : STANDARD OS SAVE AREA
+*    4) R14 : RETURN ADDRESS
+*    5) R15 : ENTRY ADDRESS
+*
+*               ( CONTINUED ... )
+*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+         EJECT
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+*
+*
+*  OUTPUT ARGUMENT: RETURN CODE FROM PUTLINE OR
+*
+RCBA     EQU   100                 BAD MESSAGE ADDRESS
+RCBL     EQU   104                 MESSAGE LENGTH <1 OR >MAXMSG
+*
+MAXMSG   EQU   255                 MAXIMUM MESSAGE LENGTH
+*
+*
+*  REGISTERS USED:
+*
+R0       EQU   0                   MESSAGE LENGTH AT ENTRY
+R1       EQU   1                   MESSAGE ADDRESS AT ENTRY
+R2       EQU   2                   WORK
+R3       EQU   3                   WORK
+RMA      EQU   4                   @MESSAGE TEXT
+RML      EQU   5                   MESSAGE LENGTH
+RUPT     EQU   6                   @UPT (USER PROFILE TABLE)
+RECT     EQU   7                   @ECT
+R12      EQU   12                  CSECT BASE
+R13      EQU   13                  @SAVE AREA AND DYNAMIC WORK AREA
+R14      EQU   14                  WORK/LINKAGE
+R15      EQU   15                  WORK/LINKAGE
+*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+         EJECT
+         IKJCPPL
+         EJECT
+         IKJTCB   LIST=YES                                  *HMD 10/85*
+         EJECT                                              *HMD 10/85*
+         CVT      DSECT=YES,LIST=YES                        *HMD 10/85*
+         EJECT
+         IHAPSA   LIST=YES                                     HD APR88
+         EJECT                                                 HD APR88
+PUTLDS   DSECT
+         DS    18F                      OS SAVE AREA
+PUTAAA   EQU   *
+PUTECB   DS    F                        ECB
+PUTIOPL  DS    4F                       IOPLADS
+PUTBLOK  PUTLINE MF=L
+PUTLEN   DS    H                        LENGTH
+PUTZZZ   DS    H                        RESERVED
+PUTMSG   DS    (MAXMSG)C                MESSAGE TEXT AREA
+         DS    0D
+PUTSIZE  EQU   *-PUTLDS                 SIZE OF PUTLINE PARMS
+         EJECT
+***********************************************************************
+*  SET UP LINKAGE
+***********************************************************************
+         SPACE 1
+EPUTL    CSECT
+         AIF  (NOT &XA).X001                                *HMD 10/85*
+EPUTL    AMODE 31
+.X001    ANOP                                               *HMD 10/85*
+         STM   R14,R12,12(R13)    SAVE CALLERS REGS
+         LR    R12,R15            COPY EPA
+         USING EPUTL,R12          ADDRESSABILITY
+         AIF   (NOT &XA).X002                               *HMD 10/85*
+         GETMAIN RU,              LV=LENGTH                            &
+               LV=PUTSIZE,        STANDARD OS SA PLUS ANY EXTRA        &
+               LOC=RES,SP=0       RELATIVE TO 16MB LINE
+         AGO   .X003                                        *HMD 10/85*
+.X002    ANOP                                               *HMD 10/85*
+         GETMAIN RU,              LV=LENGTH                            &
+               LV=PUTSIZE         STANDARD OS SA PLUS ANY EXTRA
+.X003    ANOP                                               *HMD 10/85*
+         ST    R1,8(,R13)         OUR SAVE AREA POINTER
+         ST    R13,4(,R1)         POINTER TO CALLER'S SAVE AREA
+         LR    R13,R1             @OUR SAVE AREA
+         USING PUTLDS,R13         MAP SA AND WORK AREA
+         L     R14,4(,R13)        POINT TO CALLER'S RSA
+         LM    R0,R1,20(R14)      RESTORE REGS CHANGED BY GETMAIN
+         SPACE 2
+***********************************************************************
+*  UNLOAD ARGUMENTS AND VALIDATE WHERE POSSIBLE
+***********************************************************************
+         SPACE 1
+         LA    R15,RCBA                 RC IF BAD ADDRESS
+         LTR   RMA,R1                   MESSAGE ADDRESS
+         BNP   RETURN                   GOOD ASSUMPTION
+         LA    R15,RCBL                 RC IF BAD LENGTH
+         LTR   RML,R0                   POSITIVE?
+         BNP   RETURN                   -NO
+         C     RML,=A(MAXMSG)           MORE THAN MAX?
+         BH    RETURN                   -YES
+         SPACE 2
+***********************************************************************
+*  BUILD PARAMETER LIST
+***********************************************************************
+         SPACE 1
+         LA    R15,4(,RML)              MESSAGE LENGTH
+         STH   R15,PUTLEN               PLUS HEADER
+         XC    PUTZZZ,PUTZZZ            CLEAR 2ND HWORD OF RDW
+         BCTR  RML,0                    REDUCE FOR MOVE
+         EX    RML,PUTMOVE
+         EJECT
+***********************************************************************
+*  DIG UP ADDRESS OF UPT AND ECT
+***********************************************************************
+         SPACE 1
+         L     R2,PSATOLD-PSA           @TCB                   HD APR88
+         L     R2,TCBFSA-TCB(,R2)       @1ST PROBLEM PGM SAVE AREA
+         L     R2,24(,R2)               REG1 THAT WAS PASSED TO CP
+         USING CPPL,R2                  MAP CPPL
+         L     RUPT,CPPLUPT             @UPT
+         L     RECT,CPPLECT             @ECT
+         SPACE 2
+***********************************************************************
+*  ISSUE PUTLINE CALL
+***********************************************************************
+         SPACE 1
+         XC    PUTECB,PUTECB            CLEAR ECB
+         XC    PUTBLOK(12),PUTBLOK      CLEAR PARM BLOCK       HD APR88
+         PUTLINE PARM=PUTBLOK,          PARAMETER BLOCK                &
+               UPT=(RUPT),              @UPT                           &
+               ECT=(RECT),              @ECT                           &
+               ECB=PUTECB,              @ECB                           &
+               OUTPUT=(PUTLEN,TERM,SINGLE,DATA),                       &
+               MF=(E,PUTIOPL)
+         EJECT
+***********************************************************************
+*  RETURN TO CALLER
+***********************************************************************
+         SPACE 1
+RETURN   EQU   *
+         LR    R2,R13                   @OUR SAVE AREA
+         LR    R3,R15                   SAVE RETURN CODE
+         L     R13,4(,R13)              @CALLER'S SAVE AREA
+         FREEMAIN RU,LV=PUTSIZE,A=(R2),SP=0
+         LR    R15,R3                   RESTORE RC
+         RETURN (14,12),RC=(15)         RESTORE CALLER'S REGS
+         SPACE 5
+***********************************************************************
+*  CONSTANTS AND NON-REENTRANT WORK AREAS
+***********************************************************************
+         SPACE 1
+PUTMOVE  MVC   PUTMSG(*-*),0(RMA)       MOVE MESSAGE TO BUFFER
+         SPACE 2
+         LTORG
+         SPACE 2
+         END   EPUTL

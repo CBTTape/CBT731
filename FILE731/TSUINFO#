@@ -1,0 +1,54 @@
+)F FUNCTION -
+
+  TSO command to display various aspects of running TSO sessions,
+   especially LOGON date and time.  This command can display
+   information that is not usually available to "display user"
+   type TSO commands.
+
+  Environment is APF-Authorized.
+
+  Example output:
+
+                     TSU INFORMATION - V1.5
+                     ---------------   ----
+  USERID    ASID  LOGON DATE-TIME  PROCEDURE TERMID   STLB T ROW COL
+  --------  ----  ---------------  --------- -------- ---- - --- ---
+  SBGOLOB   0040  2021.304  11:53  ISPFBARE  LCL701    F0  R  43 132
+  R         0048  2021.304  18:34  ISPFBARE  LCL702    F0  U  43 132
+  +startng  0049                             LCL703    00  S  43 132
+
+
+  Explanations:
+
+  All the TSO sessions will be displayed, and sorted in
+  ASID order.  Most of the fields are self-explanatory,
+  except for STLB.  STLB (if non-zero) indicates that one
+  or more of the TSO authorization tables, have been loaded
+  from the IKJTABLS module in an APF-authorized STEPLIB,
+  instead of being copied from the IKJTSOxx PARMLIB member.
+  This points out (more or less) "privileged" TSO userids.
+  "STLB" stands for "STepLib-Based".
+
+  The column "T" shows whether the TSO session is RACF-based
+  or "R", or if is UADS-based, or "U".  A session which is
+  "Starting" is marked "S".  "T" stands for "session Type".
+
+  As of TSUINFO 1.5, the terminal size of each TSU is marked,
+  in ROWS and COLS.
+
+  LOGON times come from each userid's PSCB.  They are not
+  dependent on SMF records.
+
+
+)X SYNTAX  -
+
+       TSUINFO
+
+  DEFAULTS - NONE
+  ALIAS    - NONE
+
+
+)O OPERANDS -
+
+))NONE
+
