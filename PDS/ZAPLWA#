@@ -1,0 +1,35 @@
+)F FUNCTION -
+  TSO/E Command to zap fields in the Logon Work
+  Area.  NOMAIL bit and NONOTICE bit.  Also
+  turns on and off the two RECONNECT bits.
+  Parm of L turns off Fullscreen LOGON.
+  Parm of P puts the password into the TSB.
+   (insecure, but allows the RELOGON program
+    to work as it was designed - CBT File 958)
+
+  You must logoff and logon again for these
+  commands to take effect.
+
+)X SYNTAX -
+  ZAPLWA M  - Turns on  NOMAIL bit
+  ZAPLWA MF - Turns off NOMAIL bit
+  ZAPLWA N  - Turns on  NONOTICES bit
+  ZAPLWA NF - Turns off NONOTICES bit
+  ZAPLWA R  - Turns on  RECONNECT bits
+  ZAPLWA RF - Turns off RECONNECT bits
+  ZAPLWA L  - Turns off Fullscreen LOGON
+  ZAPLWA LF - Turns on  Fullscreen LOGON
+  ZAPLWA P  - Put password in the TSB
+  ZAPLWA PF - Password not in the TSB
+
+)O OPERANDS -
+  M  - Turns on  NOMAIL bit
+  MF - Turns off NOMAIL bit
+  N  - Turns on  NONOTICES bit
+  NF - Turns off NONOTICES bit
+  R  - Turns on  RECONNECT bits
+  RF - Turns off RECONNECT bits
+  L  - Turns off Fullscreen LOGON
+  LF - Turns on  Fullscreen LOGON
+  P  - Put password in the TSB
+  PF - Password not in the TSB

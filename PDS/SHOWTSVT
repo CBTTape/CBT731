@@ -1,0 +1,935 @@
+         TITLE ' SHOW AND EXPLAIN ALL TSVT FIELDS  '
+************************************************************
+*        'SHOWTSVT' OR 'LIST TSVT FIELDS AND EXPLAIN THEM' *
+************************************************************
+         SPACE
+*
+*        This program is in the Public Domain.
+*
+*        THIS PROGRAM WAS CONSTRUCTED FROM THE LPSCB PROGRAM,
+*        WHICH WAS:
+*        WRITTEN BY. BILL GODFREY,  PLANNING RESEARCH CORPORATION.
+*        INSTALLATION. PRC COMPUTER CENTER INC, MCLEAN VA.
+*        DATE WRITTEN. OCTOBER 19 1979.
+*        DATE UPDATED. MAY 10, 1995   SAM GOLOB
+*                      NOV 28, 2016   SAM GOLOB
+*                      MAR 10, 2017   SAM GOLOB
+*        DATE CHANGED. JAN 02, 2019   SAM GOLOB
+*                      DEC 24, 2020   SAM GOLOB
+*                      AUG 29, 2022   SAM GOLOB
+*                      OCT 21, 2023   SAM GOLOB
+*
+*        ATTRIBUTES. RE-ENTRANT.
+*
+*        COMMENTS.
+*            THIS TSO COMMAND SHOWS ALL THE FIELDS OF THE IBM
+*            CONTROL BLOCK, TSVT, SHORT FOR "TSO VECTOR TABLE",
+*            DESCRIBED BY THE IBM MACRO, IKJTSVT.
+*
+*        CHANGE LOG:
+*           JDM - JIM MARSHALL
+*           SBG - SAM GOLOB
+*
+*     These remarks pertain to the LPSCB program:
+*     JDM    02APR91 - ADDED DSECTS TO REPLACE HARDCODED OFFSETS JDM1
+*     SBG    28NOV16 - LIST 8 HEX DIGIT ADDRESSES INSTEAD OF 6.
+*                      CHANGED AMODE TO 31. DIDN'T SEEM TO HURT.
+*     SBG    10MAR17 - FIXES FOR 8-CHARACTER USERIDS.
+*                      DEPENDS ON TSVT+6 BYTE. PROGRAM DEPENDS ON
+*                      TSVT NOW, WHICH IT DIDN'T DEPEND ON BEFORE.
+*
+*     The remarks from here on, pertain to the SHOWTSVT program:
+*
+*
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+         MACRO
+&NAME    HEX   &TO,&LEN,&FROM
+&NAME    LA    1,&FROM
+         LA    0,&LEN
+         LA    15,&TO
+         BAL   14,HEX
+         MEND
+         SPACE
+         MACRO
+&NAME    MSGZ  &AREA,&LEN
+         LA    1,&AREA
+         LA    0,&LEN
+         BAL   R14,PUTLINE
+         MVC   LINE,LINE-1
+         MEND
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+         PRINT ON,GEN
+SHOWTSVT AMODE 31                                                JDM1
+SHOWTSVT RMODE 24                                                JDM1
+SHOWTSVT CSECT
+         USING *,R12,R10
+         B     @PROLOG-*(,15)
+         DC    AL1(11),CL11'SHOWTSVT '
+         DC    CL16' &SYSDATE &SYSTIME '
+         DC    CL16' Public Domain '
+@SIZE    DC    0F'0',AL1(1),AL3(@DATAL)
+@PROLOG  STM   14,12,12(R13)       SAVE REGISTERS
+         LR    R12,R15             LOAD BASE REGISTER
+         LA    R10,2048(,R12)      Load second base
+         LA    R10,2048(,R10)
+         LR    R2,R1               PARM POINTER
+         USING CPPL,R2
+         L     R0,@SIZE            WORKAREA SUBPOOL AND LENGTH
+         GETMAIN R,LV=(0)
+         LR    R9,R1               INITIALIZE WORKAREA POINTER
+         USING @DATA,R9
+         SPACE 1
+         ST    R13,4(,R9)          CHAIN SAVEAREA
+         ST    R9,8(,R13)          CHAIN SAVEAREA
+         LR    R13,R9              UPDATE SAVEAREA POINTER
+         SPACE
+         MVI   LINE-1,C' '
+         XC    LINKAREA(8),LINKAREA
+         SPACE
+************************************************************
+*        SET UP IOPL FOR PUTLINE                           *
+************************************************************
+         SPACE
+         LA    R15,MYIOPL
+         USING IOPL,R15
+         MVC   IOPLUPT(4),CPPLUPT
+         MVC   IOPLECT(4),CPPLECT
+         LA    R0,MYECB
+         ST    R0,IOPLECB
+         XC    MYECB,MYECB
+         LA    R0,MYPTPB
+         ST    R0,IOPLIOPB
+         DROP  R15
+         SPACE
+         L     R15,CVTPTR          POINT TO CVT                  JDM1
+         USING CVTMAP,R15          GET ADDRESSABILITY            JDM1
+         TM    CVTPUTL,X'80'       IS PUTLINE LOADED? (VS2)      JDM1
+         BNO   PUTLOAD             NO - BRANCH TO LOAD
+         L     R15,CVTPUTL         YES - USE CVTPUTL             JDM1
+         DROP  R15                                               JDM1
+         B     PUTLOADX            BRANCH AROUND LOAD
+PUTLOAD  LA    R0,=CL8'IKJPUTL '
+         LOAD  EPLOC=(0)
+         LR    R15,R0              GET ENTRY ADDRESS
+         LA    R15,0(,R15)         CLEAR HI BYTE FOR DELETE ROUTINE
+PUTLOADX ST    R15,MYPUTLEP        SAVE PUTLINE ENTRY ADDRESS
+         SPACE
+         SPACE 1
+************************************************************
+*        SET UP PPL FOR PARSE                              *
+************************************************************
+         SPACE
+         LA    R15,MYPPL
+         USING PPL,R15
+         MVC   PPLUPT(4),CPPLUPT
+         MVC   PPLECT(4),CPPLECT
+         LA    R0,MYECB
+         ST    R0,PPLECB
+         XC    MYECB,MYECB
+         L     R0,=A(MYPCL)
+         ST    R0,PPLPCL
+         LA    R0,MYANS
+         ST    R0,PPLANS
+         MVC   PPLCBUF(4),CPPLCBUF
+         ST    R13,PPLUWA
+         DROP  R15
+         SPACE 1
+************************************************************
+*        CALL THE PARSE SERVICE ROUTINE                    *
+************************************************************
+         SPACE 1
+         LR    R1,R15              POINT TO PPL
+         L     R15,CVTPTR          POINT TO CVT                  JDM1
+         USING CVTMAP,R15          GET ADDRESSABILITY            JDM1
+         TM    CVTPARS,X'80'       IF HI ORDER BIT NOT ON        JDM1
+         BNO   PARSELNK               THEN DO LINK, NOT CALL
+         L     R15,CVTPARS         CVTPARS                       JDM1
+         DROP  R15                                               JDM1
+         BALR  R14,R15             CALL IKJPARS
+         B     PARSEEXT            SKIP AROUND LINK
+PARSELNK DS    0H
+         LINK  EP=IKJPARS,SF=(E,LINKAREA)
+PARSEEXT DS    0H
+         SPACE 1
+         LTR   R15,R15
+         BNZ   EXIT12
+         L     R3,MYANS
+         USING IKJPARMD,R3
+         L     R4,CPPLPSCB
+         CLI   ALLKW+1,1           'ALL SPECIFIED'
+         BE    TESTTSVT
+*                                  GET TO THE PSCB FROM ASCBXTCB
+         L     R1,X'224'           ASCB
+         L     R1,X'11C'(,R1)      ASCBXTCB  Use XTCB which is
+*                                  chained off the ASCB.
+         L     R1,X'B4'(,R1)       JSCB
+         L     R1,X'108'(,R1)      PSCB
+         LTR   R1,R1               IS THERE A PSCB?
+         BZ    EXIT12              NO. CAN'T DO ANYTHING MORE
+*                                  DO MANIPULATIONS WITH PSCB FIELDS
+*                                  HERE, ETCETERA
+         ST    R1,SAVEPSCB         SAVE IT EVEN IF WE DON'T USE IT
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*        TEST FOR PRESENCE OF 8-CHARACTER USERID SUPPORT            *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+TESTTSVT DS    0H                  TEACH PGM ABOUT 8-CHAR ID SUPPORT
+         ST    R6,SAVER6A          SAVE WORK REGISTER
+         XC    FLAG1,FLAG1         CLEAR FLAG
+         L     R6,16               CVT
+         L     R6,X'9C'(,R6)       TSVT
+         ST    R6,TSVTADDR         SAVE ADDRESS OF TSVT
+         L     R6,TSVTADDR         RELOAD TSVT ADDRESS FOR TEST
+         TM    6(R6),X'08'         IS THIS FIELD 08?
+         BO    TEST8CHR            FLIP FLAG BIT
+         CLI   6(R6),X'00'         IS IT 00, THE OLD WAY?
+         BE    TEST8END            YES. DON'T FLIP ANYTHING
+TEST7CHR DS    0H                  NOT 00 AND NOT 08.
+         OI    FLAG1,X'01'         SUPPORT ON BUT 7-CHAR UID LIMIT
+         B     TEST8END            THEN GET OUT
+TEST8CHR DS    0H                  8-CHAR SUPPORT IS ON
+         OI    FLAG1,X'02'         SUPPORT ON AND 8-CHAR UID LIMIT
+TEST8END DS    0H                  END OF ROUTINE
+         L     R6,SAVER6A          RESTORE WORK REGISTER
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*                  PRINT TITLE OF THIS REPORT                       *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+         MVC   LINE,LINE-1
+         MVC   LINET(45),TITLELIT     Program title
+         BAL   R8,MSG
+         MVC   LINE,LINE-1
+         MVC   LINET(45),TITLEUND     Underlines
+         BAL   R8,MSG
+         MVC   LINE,LINE-1
+         MVC   LINET(44),TITLEEX0     Explanation of program purpose
+         BAL   R8,MSG
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*   IF 8-CHARACTER USERID SUPPORT IS PRESENT, THEN SEND MESSAGE     *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*              It is important to know if there exists              *
+*              8-character userid support.                          *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+EIGHTCID DS    0H
+         CLI   FLAG1,X'00'         NO 8-CHARACTER SUPPORT
+         BE    EIGHTOUT            THEN GET OUT
+         TM    FLAG1,X'01'         SUPPORT IS PRESENT BUT NOT ON
+         BO    EIGHTOFF            THEN REPORT IT
+         TM    FLAG1,X'02'         SUPPORT IS PRESENT AND IS ON
+         BO    EIGHTON             THEN REPORT IT
+*                                  MSG IF 8-CHAR UID'S IN EFFECT
+EIGHTOFF DS    0H                       OFF
+         MVI   LINE-1,X'40'             BLANK MSG LINE
+         MVC   LINE,LINE-1
+         MVC   LINEU(L'MSG04),MSG04      YES, BUT
+         BAL   R8,MSG                   SUPPORT IS TURNED OFF
+         B     EIGHTOUT
+EIGHTON  DS    0H                       ON
+         MVI   LINE-1,X'40'             BLANK MSG LINE
+         MVC   LINE,LINE-1
+         MVC   LINEU(L'MSG05),MSG05      YES, AND
+         BAL   R8,MSG                   SUPPORT IS TURNED ON
+         B     EIGHTOUT
+EIGHTOUT DS    0H
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*                 PRINT THE ADDRESS OF THE TSVT                     *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+         L     R4,TSVTADDR
+         HEX   LINE+33,4,TSVTADDR
+         MVC   LINE+19(L'MSG01),MSG01
+         MSGZ  LINE,L'MSG01+30
+         HEX   LINE+35,4,TSVTADDR
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*                  PRINT REPORT TITLE HEADERS                       *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+         MVC   LINE,LINE-1
+         MVC   LINE(46),TITLEHDR
+         BAL   R8,MSG
+         MVC   LINE,LINE-1
+         MVC   LINE(46),TITLEHUN
+         BAL   R8,MSG
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*                FORMAT FIELDS OF THE TSVT LAYOUT                   *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+GOTTSVT  DS    0H
+         USING TSVT,R4
+         MVC   LINE,LINE-1
+         L     R4,TSVTADDR
+         MVC   LINETXT,TEXTTSVT
+         MVC   LINEX(4),TSVTTSVT
+         MVC   LINEC(24),=C'Control block identifier'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTLEV
+         HEX   LINEX,1,TSVTLEV
+         MVC   LINEC(18),=C'TSVT Version Level'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTFLG1
+         MVI   LINETXT+16,X'40'
+         HEX   LINEX,1,TSVTFLG1
+         MVC   LINEC(28),=C'TSVT Flag 1 - meanings below'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINEC(30),TEXTEXPL
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTEXPM
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTEXPN
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTNCTU
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTNETL
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTUPDP
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTSWCH
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTPHRS
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTAPPL
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTLGNH
+         BAL   R8,MSG
+         MVC   LINEC(30),TEXTLGPC
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTUMXL
+         HEX   LINEX,1,TSVTUMXL
+         MVC   LINEC(22),=C'TSVT Userid Max Length'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTO
+         HEX   LINEX,1,TSVTTO
+         MVC   LINEC(32),=C'LOGON Timeout Value - in minutes'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTNCT
+         HEX   LINEX,4,TSVTNCT
+         MVC   LINEC(31),=C'Address of current Notice Table'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTVACC
+         HEX   LINEX,4,TSVTVACC
+         MVC   LINEC(37),=C'Address CLIST Variable Access Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTASF
+         HEX   LINEX,4,TSVTASF
+         MVC   LINEC(37),=C'Address Auth Service Facility Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTLTBL
+         HEX   LINEX,4,TSVTLTBL
+         MVC   LINEC(30),=C'Address of Logon Service Table'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTFLA1
+         HEX   LINEX,4,TSVTFLA1
+         MVC   LINEC(37),=C'Address of Logon Initializaton module'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTCTIO
+         HEX   LINEX,4,TSVTCTIO
+         MVC   LINEC(36),=C'Address CLIST Data Mgmt I/O Executor'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTCTAB
+         HEX   LINEX,4,TSVTCTAB
+         MVC   LINEC(36),=C'Address Messages in Translate Tables'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTT440
+         HEX   LINEX,4,TSVTT440
+         MVC   LINEC(36),=C'Address CLIST Variable Access Method'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTT441
+         HEX   LINEX,4,TSVTT441
+         MVC   LINEC(37),=C'Address Genral Variable Access Method'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTPUTL
+         HEX   LINEX,4,TSVTPUTL
+         MVC   LINEC(26),=C'Address of PUTLINE Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTPTGT
+         HEX   LINEX,4,TSVTPTGT
+         MVC   LINEC(25),=C'Address of PUTGET Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTGETL
+         HEX   LINEX,4,TSVTGETL
+         MVC   LINEC(26),=C'Address of GETLINE Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSTCK
+         HEX   LINEX,4,TSVTSTCK
+         MVC   LINEC(24),=C'Address of STACK Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTSL
+         HEX   LINEX,4,TSVTTSL
+         MVC   LINEC(37),=C'Address of TMP Linkage Assist Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSCAN
+         HEX   LINEX,4,TSVTSCAN
+         MVC   LINEC(23),=C'Address of SCAN Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTPARS
+         HEX   LINEX,4,TSVTPARS
+         MVC   LINEC(24),=C'Address of PARSE Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTEF02
+         HEX   LINEX,4,TSVTEF02
+         MVC   LINEC(33),=C'Address of Message Writer Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTPVT
+         HEX   LINEX,4,TSVTTPVT
+         MVC   LINEC(37),=C'Address TSO Parmlib Vector Table TPVT'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTRCVY
+         HEX   LINEX,4,TSVTRCVY
+         MVC   LINEC(36),=C'Address of Recovery Routine IKJCMDRC'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTRAN
+         HEX   LINEX,4,TSVTTRAN
+         MVC   LINEC(19),=C'Address of IKJTRANS'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTBCMT
+         HEX   LINEX,8,TSVTBCMT
+         MVC   LINEC(37),=C'Member Token for BCAST Notice XCF Grp'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTCAF
+         HEX   LINEX,4,TSVTCAF
+         MVC   LINEC(35),=C'Address of CLIST Attention Facility'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTSOL
+         MVI   LINEX,C'V'
+         MVC   LINEX+1(1),TSVTLVER
+         MVI   LINEX+2,C'R'
+         MVC   LINEX+3(2),TSVTLREL
+         MVI   LINEX+5,C'M'
+         MVC   LINEX+6(1),TSVTLMOD
+         MVC   LINEC(21),=C'TSO/E Level Indicator'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTCTDB
+         HEX   LINEX,4,TSVTCTDB
+         MVC   LINEC(35),=C'Address of Double Byte Char Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTRIF
+         HEX   LINEX,4,TSVTRIF
+         MVC   LINEC(35),=C'BCAST Dataset Interface RTN - Rel 4'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTRAF
+         HEX   LINEX,4,TSVTRAF
+         MVC   LINEC(34),=C'LOGON RACF Support Routine - Rel 4'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTRTRP
+         HEX   LINEX,4,TSVTRTRP
+         MVC   LINEC(18),=C'TSO Router Address'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTBLS
+         HEX   LINEX,4,TSVTTBLS
+         MVC   LINEC(20),=C'Table Lookup Service'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTADTB
+         HEX   LINEX,4,TSVTADTB
+         MVC   LINEC(25),=C'Address of ALTLIB Service'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTBLR
+         HEX   LINEX,4,TSVTTBLR
+         MVC   LINEC(28),=C'Table Lookup Service Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTESTK
+         HEX   LINEX,4,TSVTESTK
+         MVC   LINEC(24),=C'REXX Key 1 Stack Routine'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTVAR
+         HEX   LINEX,4,TSVTTVAR
+         MVC   LINEC(19),=C'Address of IRXTVARS'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTINIT
+         HEX   LINEX,4,TSVTINIT
+         MVC   LINEC(18),=C'Address of IRXINIT'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTOLAR
+         HEX   LINEX,4,TSVTOLAR
+         MVC   LINEC(19),=C'Address of IRXIOLAR'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTO00
+         HEX   LINEX,4,TSVTTO00
+         MVC   LINEC(19),=C'Address of IRXSTO00'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTT44X
+         HEX   LINEX,4,TSVTT44X
+         MVC   LINEC(19),=C'Address of IKJCT44X'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTFTS2
+         HEX   LINEX,4,TSVTFTS2
+         MVC   LINEC(19),=C'Address of IKJEFTS2'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTEXE
+         HEX   LINEX,4,TSVTEXE
+         MVC   LINEC(18),=C'Address of IRXEXEC'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTINOU
+         HEX   LINEX,4,TSVTINOU
+         MVC   LINEC(19),=C'Address of IRXINOUT'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTLOA
+         HEX   LINEX,4,TSVTLOA
+         MVC   LINEC(18),=C'Address of IRXLOAD'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTER
+         HEX   LINEX,4,TSVTTER
+         MVC   LINEC(18),=C'Address of IRXTERM'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSUBC
+         HEX   LINEX,4,TSVTSUBC
+         MVC   LINEC(19),=C'Address of IRXSUBCM'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTMSGI
+         HEX   LINEX,4,TSVTMSGI
+         MVC   LINEC(19),=C'Address of IRXMSGID'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTEXCO
+         HEX   LINEX,4,TSVTEXCO
+         MVC   LINEC(19),=C'Address of IRXEXCOM'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTERM
+         HEX   LINEX,4,TSVTTERM
+         MVC   LINEC(19),=C'Address of IRXTERMA'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTETVP
+         HEX   LINEX,4,TSVTETVP
+         MVC   LINEC(32),=C'Address of Exit and Vector Table'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTSFI
+         HEX   LINEX,4,TSVTTSFI
+         MVC   LINEC(19),=C'Address of IKJEFTSI'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTTSFT
+         HEX   LINEX,4,TSVTTSFT
+         MVC   LINEC(19),=C'Address of IKJEFTST'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTPCN1
+         HEX   LINEX,4,TSVTPCN1
+         MVC   LINEC(22),=C'PC Number for IKJPCENV'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSNTA
+         HEX   LINEX,4,TSVTSNTA
+         MVC   LINEC(24),=C'System copy of the SNTAB'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSVTA
+         HEX   LINEX,4,TSVTSVTA
+         MVC   LINEC(24),=C'System copy of the SVTAB'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSYML
+         HEX   LINEX,4,TSVTSYML
+         MVC   LINEC(32),=C'Length of system SNTAB and SVTAB'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTXCFU
+         HEX   LINEX,4,TSVTXCFU
+         MVC   LINEC(25),=C'Lock for PARMLIB updating'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTMSTR
+         HEX   LINEX,4,TSVTMSTR
+         MVC   LINEC(22),=C'Address of Master ASCB'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTBECB
+         HEX   LINEX,4,TSVTBECB
+         MVC   LINEC(16),=C'ECB for IKJBCMSG'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTAPPC
+         HEX   LINEX,4,TSVTAPPC
+         MVC   LINEC(35),=C'Addr of APPC Callable Service Table'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTURPS
+         HEX   LINEX,4,TSVTURPS
+         MVC   LINEC(25),=C'Address of IKJURPS module'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTPCN2
+         HEX   LINEX,4,TSVTPCN2
+         MVC   LINEC(22),=C'PC Number for IKJCMDPC'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTMSR0
+         HEX   LINEX,4,TSVTMSR0
+         MVC   LINEC(25),=C'Address of IKJMSR0 module'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTMDT@
+         HEX   LINEX,4,TSVTMDT@
+         MVC   LINEC(23),=C'Address of Module Table'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSECB
+         HEX   LINEX,4,TSVTSECB
+         MVC   LINEC(26),=C'ECB for broadcast switches'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSWAS
+         MVI   LINETXT+16,X'40'
+         HEX   LINEX,4,TSVTSWAS
+         MVC   LINEC(33),=C'Address of ASCB for address space'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINEC(31),TEXTSWWZ
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSWWA
+         HEX   LINEX,4,TSVTSWWA
+         MVC   LINEC(35),=C'Address switch processing work area'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTSWCB
+         HEX   LINEX,4,TSVTSWCB
+         MVC   LINEC(31),=C'Address of switch control block'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTRSV1
+         HEX   LINEX,16,TSVT+X'10C'
+         MVC   LINEC+17(10),=C'RESERVED 1'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTRSV2
+         HEX   LINEX,12,TSVT+X'11C'
+         MVC   LINEC+17(10),=C'RESERVED 2'
+         BAL   R8,MSG
+         SPACE
+         MVC   LINETXT,TEXTEND
+         MVI   LINETXT+16,X'40'
+         BAL   R8,MSG
+TSVTENDX B     EXIT0
+         SPACE
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+*     ROUTINE TO SHOW HEXADECIMAL VALUES AS DISPLAY CHARACTERS      *
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+HEX      MVC   1(1,R15),0(R1)      MOVE BYTE
+         UNPK  0(3,R15),1(2,R15)   UNPACK
+         TR    0(2,R15),HEXTAB-240
+         LA    R15,2(,R15)         INCREMENT OUTPUT PTR
+         LA    R1,1(,R1)           INCREMENT INPUT PTR
+         BCT   R0,HEX              DECREMENT LENGTH, THEN LOOP
+         MVI   0(R15),C' '         BLANK THE TRAILING BYTE
+         BR    R14                 RETURN TO CALLER
+HEXTAB   DC    C'0123456789ABCDEF' TRANSLATE TABLE
+         SPACE
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+MSG      LA    R1,LINE             DISPLAY A MESSAGE W/PUTLINE
+         LA    R0,72
+         BAL   R14,PUTLINE
+         MVC   LINE,LINE-1
+         BR    R8
+         SPACE
+************************************************************
+*        PUTMSG ROUTINE                                    *
+************************************************************
+         SPACE
+PUTMSG   STM   R14,R1,PUTSAVE
+         XC    MYOLD(8),MYOLD
+         XC    MYSEG1(4),MYSEG1
+         MVC   MYPTPB(12),MODLPTPM
+         LA    R14,1               NO. OF MESSAGE SEGMENTS
+         ST    R14,MYOLD
+         LA    R14,MYSEG1          POINT TO 1ST SEGMENT
+         ST    R14,MYOLD+4
+         LR    R14,R0              LENGTH IN R0
+         LA    R14,4(,R14)         ADD 4
+         LA    R15,MYSEG1+4
+         CLC   0(3,R1),=C'IKJ'     IS DATA PRECEEDED BY MESSAGE ID?
+         BE    *+16                YES - BRANCH
+         LA    R14,1(,R14)         ADD 1 TO LENGTH
+         MVI   0(R15),C' '         INSERT LEADING BLANK
+         LA    R15,1(,R15)         BUMP POINTER
+         STH   R14,MYSEG1
+         LR    R14,R0
+         BCTR  R14,0
+         B     *+10
+         MVC   0(0,R15),0(R1)      MOVE MESSAGE IN
+         EX    R14,*-6
+         LA    R1,MYIOPL
+         L     R15,MYPUTLEP
+         SPACE
+         PUTLINE PARM=MYPTPB,OUTPUT=(MYOLD),ENTRY=(15),MF=(E,(1))
+         SPACE
+         LM    R14,R1,PUTSAVE
+         BR    R14
+         SPACE
+************************************************************
+*        PUTLINE ROUTINE                                   *
+************************************************************
+         SPACE
+PUTLINE  STM   R14,R1,PUTSAVE
+         XC    MYSEG1(4),MYSEG1
+         MVC   MYPTPB(12),MODLPTPB
+         LR    R14,R0              LENGTH IN R0
+         LA    R14,4(,R14)         ADD 4
+         STH   R14,MYSEG1
+         LR    R14,R0
+         BCTR  R14,0
+         B     *+10
+         MVC   MYSEG1+4(0),0(R1)   MOVE TEXT IN
+         EX    R14,*-6
+         LA    R1,MYIOPL
+         L     R15,MYPUTLEP
+         SPACE
+         PUTLINE PARM=MYPTPB,OUTPUT=(MYSEG1,DATA),ENTRY=(15),MF=(E,(1))
+         SPACE
+         LM    R14,R1,PUTSAVE
+         BR    R14
+         SPACE 1
+EXIT0    SR    R15,R15             RETURN CODE ZERO
+         B     EXIT
+EXIT12   LA    R15,12              RETURN CODE 12
+EXIT     LR    R2,R15              SAVE RETURN CODE
+EXITX    LR    R15,R2              RESTORE RETURN CODE
+         LR    R1,R13              POINT R1 TO AREA TO BE FREED
+         L     R0,@SIZE            SUBPOOL AND LENGTH
+         L     R13,4(,R13)         RESTORE PREVIOUS SAVEAREA
+         ST    R15,16(,R13)        STORE RETURN CODE FOR LM
+         FREEMAIN R,A=(1),LV=(0)
+         LM    14,12,12(R13)       LOAD RETURN ADDRESS AND RC
+         BR    14                  RETURN
+         SPACE
+************************************************************
+*        CONSTANTS                                         *
+************************************************************
+         SPACE
+         LTORG
+         SPACE
+MODLPTPM PUTLINE OUTPUT=(1,TERM,SINGLE,INFOR),                         X
+               TERMPUT=(EDIT,WAIT,NOHOLD,NOBREAK),MF=L
+         SPACE
+MODLPTPB PUTLINE OUTPUT=(1,TERM,SINGLE,DATA),                          X
+               TERMPUT=(EDIT,WAIT,NOHOLD,NOBREAK),MF=L
+         SPACE
+         DS    0F
+BLANKS   DC    C'                '
+MSG01    DC    C'TSVT ADDRESS:'
+MSG02    DC    C'UPT FROM PSCB   '
+MSG02A   DC    C'UPT FROM CPPL   '
+MSG03    DC    C'ECT ADDRESS '
+MSG04    DC    C'8-CHARACTER USERID SUPPORT IS: OFF'
+MSG05    DC    C'8-CHARACTER USERID SUPPORT IS: ON '
+MSGDASH  DC    C'------------------------------'
+TITLELIT DC    C'     SHOW TSVT - TSO VECTOR TABLE - FIELDS'
+TITLEUND DC    C'     ---- ----   --- ------ ----- - ------'
+TITLEEX0 DC    C'        Display of the TSO Vector Table     '
+TITLEHDR DC    C'  addr  field     value            explanation'
+TITLEHUN DC    C'  ----  -----     -----            -----------'
+TEXTTSVT DC    C'    +0  TSVTTSVT'            4 BYTES
+TEXTLEV  DC    C'    +4  TSVTLEV '            1 BYTE
+TEXTFLG1 DC    C'    +5  TSVTFLG1'            1 BYTE
+TEXTEXPL DC    C'(These are the real switches  '
+TEXTEXPM DC    C' which turn on the functions.)'
+TEXTEXPN DC    C'  (Copies are in the TPVT.)   '
+TEXTNCTU DC    C'Must update LISTBC notices  80'
+TEXTNETL DC    C'No TSO/E exits in LPA/CLPA  40'
+TEXTUPDP DC    C'IKJBCMSG-Parmlib Update     20'
+TEXTSWCH DC    C'IKJBCMSG-BCAST Dataset SWCH 10'
+TEXTPHRS DC    C'Password Phrase Support     08'
+TEXTAPPL DC    C'Applid Verification         04'
+TEXTLGNH DC    C'LOGONHERE Support           02'
+TEXTLGPC DC    C'Password Preprompt Support  01'
+TEXTUMXL DC    C'    +6  TSVTUMXL'            1 BYTE
+TEXTTO   DC    C'    +7  TSVTTO  '            1 BYTE
+TEXTNCT  DC    C'    +8  TSVTNCT '            4 BYTES
+TEXTVACC DC    C'    +C  TSVTVACC'            4 BYTES
+TEXTASF  DC    C'   +10  TSVTASF '            4 BYTES
+TEXTLTBL DC    C'   +14  TSVTLTBL'            4 BYTES
+TEXTFLA1 DC    C'   +18  TSVTFLA1'            4 BYTES
+TEXTCTIO DC    C'   +1C  TSVTCTIO'            4 BYTES
+TEXTCTAB DC    C'   +20  TSVTCTAB'            4 BYTES
+TEXTT440 DC    C'   +24  TSVTT440'            4 BYTES
+TEXTT441 DC    C'   +28  TSVTT441'            4 BYTES
+TEXTPUTL DC    C'   +2C  TSVTPUTL'            4 BYTES
+TEXTPTGT DC    C'   +30  TSVTPTGT'            4 BYTES
+TEXTGETL DC    C'   +34  TSVTGETL'            4 BYTES
+TEXTSTCK DC    C'   +38  TSVTSTCK'            4 BYTES
+TEXTTSL  DC    C'   +3C  TSVTTSL '            4 BYTES
+TEXTSCAN DC    C'   +40  TSVTSCAN'            4 BYTES
+TEXTPARS DC    C'   +44  TSVTPARS'            4 BYTES
+TEXTEF02 DC    C'   +48  TSVTEF02'            4 BYTES
+TEXTTPVT DC    C'   +4C  TSVTTPVT'            4 BYTES
+TEXTRCVY DC    C'   +50  TSVTRCVY'            4 BYTES
+TEXTTRAN DC    C'   +54  TSVTTRAN'            4 BYTES
+TEXTBCMT DC    C'   +58  TSVTBCMT'            8 BYTES
+TEXTCAF  DC    C'   +60  TSVTCAF '            4 BYTES
+TEXTTSOL DC    C'   +64  TSVTTSOL'            4 BYTES
+TEXTCTDB DC    C'   +68  TSVTCTDB'            4 BYTES
+TEXTRIF  DC    C'   +6C  TSVTRIF '            4 BYTES
+TEXTRAF  DC    C'   +70  TSVTRAF '            4 BYTES
+TEXTRTRP DC    C'   +74  TSVTRTRP'            4 BYTES
+TEXTTBLS DC    C'   +78  TSVTTBLS'            4 BYTES
+TEXTADTB DC    C'   +7C  TSVTADTB'            4 BYTES
+TEXTTBLR DC    C'   +80  TSVTTBLR'            4 BYTES
+TEXTESTK DC    C'   +84  TSVTESTK'            4 BYTES
+TEXTTVAR DC    C'   +88  TSVTTVAR'            4 BYTES
+TEXTINIT DC    C'   +8C  TSVTINIT'            4 BYTES
+TEXTOLAR DC    C'   +90  TSVTOLAR'            4 BYTES
+TEXTTO00 DC    C'   +94  TSVTTO00'            4 BYTES
+TEXTT44X DC    C'   +98  TSVTT44X'            4 BYTES
+TEXTFTS2 DC    C'   +9C  TSVTFTS2'            4 BYTES
+TEXTEXE  DC    C'   +A0  TSVTEXE '            4 BYTES
+TEXTINOU DC    C'   +A4  TSVTINOU'            4 BYTES
+TEXTLOA  DC    C'   +A8  TSVTLOA '            4 BYTES
+TEXTTER  DC    C'   +AC  TSVTTER '            4 BYTES
+TEXTSUBC DC    C'   +B0  TSVTSUBC'            4 BYTES
+TEXTMSGI DC    C'   +B4  TSVTMSGI'            4 BYTES
+TEXTEXCO DC    C'   +B8  TSVTEXCO'            4 BYTES
+TEXTTERM DC    C'   +BC  TSVTTERM'            4 BYTES
+TEXTETVP DC    C'   +C0  TSVTETVP'            4 BYTES
+TEXTTSFI DC    C'   +C4  TSVTTSFI'            4 BYTES
+TEXTTSFT DC    C'   +C8  TSVTTSFT'            4 BYTES
+TEXTPCN1 DC    C'   +CC  TSVTPCN1'            4 BYTES
+TEXTSNTA DC    C'   +D0  TSVTSNTA'            4 BYTES
+TEXTSVTA DC    C'   +D4  TSVTSVTA'            4 BYTES
+TEXTSYML DC    C'   +D8  TSVTSYML'            4 BYTES
+TEXTXCFU DC    C'   +DC  TSVTXCFU'            4 BYTES
+TEXTMSTR DC    C'   +E0  TSVTMSTR'            4 BYTES
+TEXTBECB DC    C'   +E4  TSVTBECB'            4 BYTES
+TEXTAPPC DC    C'   +E8  TSVTAPPC'            4 BYTES
+TEXTURPS DC    C'   +EC  TSVTURPS'            4 BYTES
+TEXTPCN2 DC    C'   +F0  TSVTPCN2'            4 BYTES
+TEXTMSR0 DC    C'   +F4  TSVTMSR0'            4 BYTES
+TEXTMDT@ DC    C'   +F8  TSVTMDT@'            4 BYTES
+TEXTSECB DC    C'   +FC  TSVTSECB'            4 BYTES
+TEXTSWAS DC    C'  +100  TSVTSWAS'            4 BYTES
+TEXTSWWZ DC    C'requesting the broadcast switch'
+TEXTSWWA DC    C'  +104  TSVTSWWA'            4 BYTES
+TEXTSWCB DC    C'  +108  TSVTSWCB'            4 BYTES
+TEXTRSV1 DC    C'  +10C  RESERV-1'           16 BYTES
+TEXTRSV2 DC    C'  +11C  RESERV-2'           12 BYTES
+TEXTEND  DC    C'  +128  END-TSVT'            0 BYTES
+*EXTTSV1 DC    C'Bytes +4C, +4D, +4E are just  '
+*EXTTSV2 DC    C'status indicators. The real   '
+*EXTTSV3 DC    C'switches are at TSVT+5 thru +7'
+         SPACE
+************************************************************
+*        PARSE PCL                                         *
+************************************************************
+         SPACE
+         PRINT GEN
+MYPCL    IKJPARM
+ALLKW    IKJKEYWD
+         IKJNAME 'ALL'
+         IKJENDP
+         PRINT GEN
+         SPACE
+************************************************************
+*        DSECTS                                            *
+************************************************************
+         SPACE
+@DATA    DSECT
+         DS    18F                 REGISTER SAVEAREA
+DOUBLE   DS    D                   DOUBLEWORD WORK AREA
+LINKAREA DS    2F
+ADDRESS  DS    F
+TSVTADDR DS    F                   TSVTADDR
+UPTADDR  DS    F                   UPT FROM PSCB
+UPTADDRC DS    F                   UPT FROM CPPL
+ECTADDR  DS    F
+SAVER6A  DS    F
+SAVER9A  DS    F
+SAVEPSCB DS    F                   WE DON'T USE IT, BUT WE HAVE IT
+MYPPL    DS    7F
+MYANS    DS    F
+MYECB    DS    F                   USED BY PUTLINE ROUTINE
+MYIOPL   DS    4F                  USED BY PUTLINE ROUTINE
+MYPTPB   DS    3F                  USED BY PUTLINE ROUTINE
+MYPUTLEP DS    F                   USED BY PUTLINE ROUTINE
+MYOLD    DS    2F                  USED BY PUTLINE ROUTINE
+MYSEG1   DS    2H,CL100            USED BY PUTLINE ROUTINE
+PUTSAVE  DS    4F                  USED BY PUTLINE ROUTINE
+FLAG1    DS    X
+*                                  X'00' IF NO 8-CHAR UID SUPPORT
+*                                  X'01' IF 8-CHAR SUPPORT BUT NOT ON
+*                                  X'02' IF 8-CHAR SUPPORT IS ON
+LINEB    DS    C                   LINE-1
+LINE     DS    CL120
+LINETXT  EQU   LINE,17
+LINEX    EQU   LINE+18
+LINEC    EQU   LINE+35
+LINET    EQU   LINE+8
+LINEU    EQU   LINE+15
+ENTRY    DS    F                1  LOADED ENTRY POINT OF TODCNVRT
+PARAM    DS    5F               2  PARAMETER LIST FOR TODCNVRT PROGRAM
+CLOCK    DS    D                3  TARGET AREA OF STCK INSTRUCTION
+TIMEZONE DS    F                4  FILLED IN FROM CVTTZ
+ANSWER   DS    CL64             5  ANSWER PLACE FOR TODCNVRT PROGRAM
+         DS    C
+TIMEFMT  DS    CL64                FORMAT FOR DATE AND TIME DISPLAY
+OPTION   DS    C
+WORKA    DS    10D
+PARMSAVE DS    F
+@DATAL   EQU   *-@DATA
+         SPACE 1                                                 JDM1
+         CVT   DSECT=YES,LIST=NO                                 JDM1
+         SPACE 1                                                 JDM1
+         PRINT ON,GEN
+         IKJTCB DSECT=YES,LIST=NO                                JDM1
+         SPACE 1                                                 JDM1
+         IKJPSCB
+         SPACE
+         IKJTSVT
+         SPACE
+         IEZJSCB                                                 JDM1
+         SPACE
+         IKJCPPL
+         SPACE
+         IKJIOPL
+         SPACE
+         IKJPPL
+         SPACE
+         IKJUPT
+         SPACE
+         IKJECT
+         SPACE
+         PRINT OFF
+         YREGS
+         END

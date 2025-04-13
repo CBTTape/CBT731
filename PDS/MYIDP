@@ -1,0 +1,569 @@
+*      M Y I D   P R O G R A M    -    A   T S O   C O M M A N D
+*
+*      TSO COMMAND PROCESSOR TO DISPLAY THE USERID OF THE INVOKER.
+*
+*        This version uses the TSO PUTLINE interface and will
+*        show the userid when run under TSO-in-batch or TSSO.
+*
+*        This program differentiates between a TSO session
+*        originating from UADS as opposed to a session originatng
+*        from RACF.  Other security systems are now taken into
+*        account.  The test for UADS is whether the LOGON PROC
+*        field is filled in in the LWA.
+*
+*        This program does not have to be authorized.
+*
+*
+*        REGISTER EQUATES
+         YREGS                ,    IBM'S REGISTER EQUATE MACRO
+         MACRO
+&NAME    HEX   &TO,&LEN,&FROM
+&NAME    STM   R15,R1,HEXSAVE           Save work registers.
+         LA    R1,&FROM                 Load from address.
+         LA    R0,&LEN                  Load length of hex number.
+         LA    R15,&TO                  Load to address.
+         BAL   R9,HEX                   BAL to routine.
+         LM    R15,R1,HEXSAVE           Restore work registers.
+         MEND
+SP000    EQU   0                   DEFINE SUBPOOL TO BE 0
+*
+MYID     CSECT
+MYID     AMODE 31
+MYID     RMODE 24
+         STM   R14,R12,12(R13)     SAVE CALLER'S REGISTERS R14 THRU R12
+         LR    R12,R15             LOAD ENTRY POINT INTO BASE REGISTER
+         USING MYID,R12            TELL THE ASSEMBLER, R12 IS THE BASE
+         LR    R5,R1               SAVE CPPL POINTER
+         GETMAIN RU,LV=DATALEN,SP=SP000,LOC=BELOW
+*  The address of the obtained storage is placed into Register 1.
+         ST    R13,4(,R1)          SAVE CALLER'S SAVEAREA ADDRESS
+         ST    R1,8(,R13)          STORE OUR SAVEAREA ADDRESS IN HIS
+         LR    R13,R1              POINT REGISTER 13 TO OUR SAVE AREA
+         USING SAVEAREA,R13        TELL ASSEMBLER
+         LR    R1,R5               RESTORE CPPL POINTER
+         LR    R11,R5              POINT TO CPPL.
+INITCON  MVI   FLAG1,X'00'
+         MVC   OUTAREA,=CL8' '
+RUNCHAIN L     R3,16               POINT TO CVT. ADDR IS IN LOW STORAGE
+         USING CVT,R3
+         L     R3,CVTTCBP          POINT TO TCB/ASCB WORDS, "0" OFF CVT
+         L     R3,4(,R3)           POINT TO TCB, "4" OFF TCB/ASCB WORDS
+         DROP  R3
+         USING TCB,R3
+         L     R3,TCBJSCB          POINT TO JSCB. X'B4' OFF CURRENT TCB
+         DROP  R3
+         USING IEZJSCB,R3
+         L     R3,JSCBPSCB         POINT TO PSCB. X'108' OFF THE JSCB
+         ST    R3,SAVEPSCB
+         DROP  R3
+         USING PSCB,R3
+         MVC   MESSAGE(23),MSGLINE        MOVE TEXT TO VARIABLE AREA
+         CLI   PSCBUSER,C'>'
+         BE    BIGID
+         MVC   MESSAGE+15(7),PSCBUSER     MOVE MY USERID INTO MESSAGE
+         B     RUNCHANS
+BIGID    DS    0H
+         MVC   MESSAGE+15(8),PSCB+X'54'   MOVE MY USERID INTO MESSAGE
+         DROP  R3
+* ---- >
+RUNCHANS L     R5,X'10'             CVT
+*        L     R5,X'C4'(,R5)        POINT TO SMCA
+*        LA    R5,X'10'(,R5)        POINT TO SYSID
+         LA    R5,X'154'(,R5)       POINT TO SYSTEM NAME
+         MVC   MESSAGS(23),MSGLINS        MOVE TEXT TO VARIABLE AREA
+         MVC   MESSAGS+15(8),0(R5)    MOVE SYSID INTO MESSAGE
+* ---- >
+RUNCHANK L     R5,X'10'             CVT
+         S     R5,=F'32'            POINT TO SYSTEM LEVEL
+         MVC   MESSAGK(23),MSGLINK        MOVE TEXT TO VARIABLE AREA
+         MVC   MESSAGK+15(7),0(R5)    MOVE SYSTEM LEVEL INTO MESSAGE
+* ---- >
+RUNCHANL L     R5,X'10'             CVT
+         S     R5,=F'40'            POINT TO SYSTEM LEVEL
+         MVC   MESSAGL(23),MSGLINL        MOVE TEXT TO VARIABLE AREA
+         MVC   MESSAGL+15(7),0(R5)    MOVE SYSTEM LEVEL INTO MESSAGE
+* ---- >
+         L     R5,X'224'            ASCB
+         LA    R5,X'24'(,R5)        ASCBASID
+         MVC   MESSAGA(23),MSGLINA
+         HEX   MESSAGA+15,2,0(R5)     MOVE ASID INTO MESSAGE
+* ---- >
+         L     R5,X'224'            ASCB
+         L     R5,X'6C'(,R5)        POINT TO ASXB
+         L     R5,X'14'(,R5)        POINT TO LWA
+         MVC   CLWA(1),X'261'(R5)   GET CREATOR OF LWA
+         MVC   MESSAGP(23),MSGLINP
+         MVC   MESSAGP+15,X'1B8'(R5)  MOVE IN PROC NAME
+         L     R6,X'1B8'(,R5)
+* ---- >
+         LTR   R6,R6               YES.  IT'S NOT THERE.
+         BNZ   ALTPROC             IF IT IS, JUST GO ON.
+*                                  IT'S NOT THERE, DO SOMETHING ELSE.
+         L     R5,X'224'
+         L     R5,X'6C'(,R5)       POINT TO ASXB
+         L     R4,X'F8'(,R5)       POINT TO ASXBITCB
+         XR    R5,R5               CLEAR REGISTER
+         ICM   R5,7,X'A5'(R4)      POINT TO TCTB (24-BIT)
+         BZ    TRYCSCB             AIN'T THERE, TRY ANOTHER WAY.
+         MVC   MESSAGP+15(8),X'C8'(R5)   GET PROC NAME THIS WAY
+         B     MOVSTEP                 THEN GET STEPLIB FLAGS.
+TRYCSCB  DS    0H
+         L     R5,X'224'           BACK TO ASCB
+         L     R5,X'38'(,R5)       POINT TO ITS CSCB ENTRY (31-BIT)
+         MVC   MESSAGP+15(8),X'10'(R5)   GET THE PROCNAME THIS WAY
+         B     MOVSTEP                 THEN GET STEPLIB FLAGS
+ALTPROC  DS    0H
+         MVC   MESSAGP+15(8),X'1B8'(R5)   MOVE LOGON PROC NAME
+MOVSTEP  DS    0H
+ALTPROCE DS    0H
+MACHLEVL DS    0H
+         L     R5,X'10'            POINT TO CVT
+         S     R5,=F'6'            POINT TO MACHINE MODEL
+         MVC   MESSAGM(23),MSGLINM
+         HEX   MESSAGM+15,2,0(R5)  MOVE MACHINE MODEL INTO MESSAGE
+RESPACK  DS    0H
+         L     R5,X'10'            POINT TO CVT
+         L     R5,X'30'(,R5)       POINT TO CVTSYSAD
+         LA    R5,X'4'(,R5)        BUMP TO WHERE THE UNIT ADDRESS IS
+         MVC   MESSAGR(23),MSGLINR
+         HEX   MESSAGR+15,2,0(R5)  MOVE RES UNIT ADDRESS INTO MESSAGE
+RESVOLUM DS    0H
+         L     R5,X'10'            POINT TO CVT
+         L     R5,X'30'(,R5)       POINT TO CVTSYSAD
+         LA    R5,X'1C'(,R5)       BUMP TO WHERE SYSRES VOLSER IS
+         MVC   MESSAGV(23),MSGLINV
+         MVC   MESSAGV+15(6),0(R5) MOVE RES UNIT ADDRESS INTO MESSAGE
+SESSFROM DS    0H                  WHO ORIGINATED THIS SESSION?
+         L     R7,X'224'           POINT TO ASCB
+         L     R7,X'6C'(,R7)       POINT TO ASXB
+         L     R7,X'14'(,R7)       POINT TO LWA
+         LA    R7,X'18C'(,R7)      POINT TO LWAWHOIF FULLWORD FIELD
+         MVC   MESSAGU(23),MSGLINU
+         MVC   MESSAGY(23),MSGLINY
+         DS    0H
+TERMID   L     R5,X'224'            ASCB
+         L     R5,X'6C'(,R5)        POINT TO ASXB
+         L     R5,X'C8'(,R5)        POINT TO ACEE
+         MVC   MESSAGT(23),MSGLINT  MOVE IN MSG HEADER
+         LA    R5,X'40'(,R5)        POINT TO TERMINAL ID
+         MVC   MESSAGT+15(8),0(R5)  MOVE TERMID NAME
+PFXWRT   DS    0H
+         L     R5,SAVEPSCB          GET PSCB ADDRESS
+         L     R5,X'34'(,R5)        POINT TO UPT
+         LA    R5,X'10'(,R5)        POINT TO OLD PREFIX
+         MVC   MESSAGF(23),MSGLINF  MOVE MSG TITLE
+         CLI   0(R5),C'>'           MORE THAN 7 CHARS?
+         BE    PFXMORE              GET DIFFERENT PREFIX FIELD
+         MVC   OUTAREA(7),0(R5)
+         MVC   MESSAGF+15(7),0(R5)  MOVE PREFIX VALUE
+         B     EIGHTCH              FINISH ROUTINE
+PFXMORE  DS    0H                   MORE THAN 7 CHARS
+         LA    R5,X'11'(,R5)        MOVE POINTER TO NEW PREFIX
+         MVC   OUTAREA(8),0(R5)
+         MVC   MESSAGF+15(8),0(R5)  MOVE NEW PREFIX VALUE
+EIGHTCH  DS    0H
+         L     R5,X'10'             CVT
+         L     R5,X'9C'(,R5)        TSO VECTOR TABLE
+         LA    R5,X'6'(,R5)         8-CHAR SWITCH
+         MVC   MESSAG8(24),MSGLIN8  MOVE IN MSG HEADER
+         TM    0(R5),X'08'          IS IT ON?
+         BZ    ITISOFF
+         MVC   MESSAG8+15(9),=C'8-CHR ON '
+         B     MBRACF
+ITISOFF  DS    0H
+         MVC   MESSAG8+15(9),=C'8-CHR OFF'
+MBRACF   DS    0H          FIND THE SECURITY SYSTEM NAME, IF ANY.
+         L     R5,16               GO TO CVT
+         L     R5,X'3E0'(,R5)      LOAD POINTER TO RCVT
+         CLC   ZEROES(4),0(R5)     IS THERE AN RCVT?
+         BE    SESSNONE            NO SECURITY IF ZERO
+         CLC   =C'RCVT',0(R5)      RACF?
+         BE    SESSRACF
+         CLC   =C'ACF2',0(R5)      ACF2?
+         BE    SESSACF2
+         CLC   =C'RTSS',0(R5)      TSS?
+         BE    SESSTSS
+         CLC   =C'DBLT',0(R5)      DEADBOLT?
+         BE    SESSDBLT
+         CLC   =C'PIES',0(R5)      PIES
+         BE    SESSPIES
+SESSRACF DS    0H
+         MVC   MESSAGY+15(4),=C'RACF'
+         MVC   MESSAGU+15(4),=C'RACF'
+         B     SESSUADS
+SESSACF2 DS    0H
+         MVC   MESSAGY+15(4),=C'ACF2'
+         MVC   MESSAGU+15(4),=C'ACF2'
+         B     SESSUADS
+SESSTSS  DS    0H
+         MVC   MESSAGY+15(4),=C'TSS '
+         MVC   MESSAGU+15(4),=C'TSS '
+         B     SESSUADS
+SESSDBLT DS    0H
+         MVC   MESSAGY+15(4),=C'DBLT'
+         MVC   MESSAGU+15(4),=C'DBLT'
+         B     SESSUADS
+SESSPIES DS    0H
+         MVC   MESSAGY+15(4),=C'PIES'
+         MVC   MESSAGU+15(4),=C'PIES'
+         B     SESSUADS
+SESSNONE DS    0H
+         MVC   MESSAGY+15(4),=C'NONE'
+         B     SESSUADS
+SESSUADS DS    0H
+         CLC   =X'00000014',0(R7)  If F'14' then session from UADS.
+         BNE   SESSDIAG
+         MVC   MESSAGU+15(4),=C'UADS'
+         B     SESSDIAG
+SESSDIAG DS    0H
+         MVC   MESSAGD(23),MSGLIND
+         HEX   MESSAGD+15,4,0(R7)  MOVE DIAGNOSTIC INFO IN MESSAGE
+         B     SESSCLWA
+SESSCLWA DS    0H
+         MVC   MESSAGW(23),MSGLCLWA
+         HEX   MESSAGW+15,1,CLWA
+SESSFEND DS    0H
+* ---- >
+         BAL   R9,CPPLPTRS
+         BAL   R9,SETIOPL
+         MVI   LINEB,C' '          INITIALIZE BLANK
+CONT0    LTR   R11,R11             ANY CPPL?
+         BZ    EOJ8                NO.  GET OUT
+         L     R1,0(,R11)          PT TO CMD BUFFER.
+         LTR   R1,R1               ANY CMD BUFFER?
+         BZ    EOJ4                GET OUT IF NONE
+         LH    R3,0(,R1)           LOAD LENGTH.
+         LR    R5,R3               LENGTH OF COMMAND + 4
+         ICM   R5,14,FULLZERO      CLEAR HI ORDER 3 BYTES
+         LH    R3,2(,R1)           LOAD OFFSET.
+         SR    R5,R3               SUBTRACT OFFSET FROM FULL LENGTH+4
+         SH    R5,=H'4'            CORRECT FOR LENGTH OF CMDBUFR HEADER
+         BAL   R9,PGMTITLE
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGE),MESSAGE
+         LA    R0,L'MESSAGE+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGF),MESSAGF
+         LA    R0,L'MESSAGF+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGS),MESSAGS
+         LA    R0,L'MESSAGS+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGK),MESSAGK
+         LA    R0,L'MESSAGK+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGL),MESSAGL
+         LA    R0,L'MESSAGL+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGA),MESSAGA
+         LA    R0,L'MESSAGA+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGP),MESSAGP
+         LA    R0,L'MESSAGP+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGM),MESSAGM
+         LA    R0,L'MESSAGM+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGT),MESSAGT
+         MVI   LINET,C'T'
+         LA    R0,L'MESSAGT+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAG8),MESSAG8
+         LA    R0,L'MESSAG8+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGR),MESSAGR
+         LA    R0,L'MESSAGR+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGV),MESSAGV
+         LA    R0,L'MESSAGV+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGY),MESSAGY
+         LA    R0,L'MESSAGY+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGU),MESSAGU
+         LA    R0,L'MESSAGU+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGD),MESSAGD
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGW),MESSAGW
+         LA    R0,L'MESSAGW+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET+1(L'MSLWAC1),MSLWAC1
+         LA    R0,L'MSLWAC1+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET+1(L'MSLWAC2),MSLWAC2
+         LA    R0,L'MSLWAC2+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET+1(L'MSLWAC3),MSLWAC3
+         LA    R0,L'MSLWAC3+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET+1(L'MSLWAC4),MSLWAC4
+         LA    R0,L'MSLWAC4+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET+1(L'MSLWAC5),MSLWAC5
+         LA    R0,L'MSLWAC5+7
+         BAL   R4,MSG
+         LA    R0,23
+         BAL   R4,MSG
+         B     EOJ0
+         MVC   LINE(137),LINE-1
+         LA    R0,23
+         BAL   R4,MSG
+         B     EOJ0
+EOJ0     DS    0H
+         SR    R15,R15
+         B     RETURN
+EOJ4     DS    0H
+         LA    R15,4
+         B     RETURN
+EOJ8     DS    0H
+         LA    R15,8
+         B     RETURN
+RETURN   DS    0H
+         LR    R1,R13              SET UP FOR SAVEAREA FREEMAIN
+         L     R13,4(,R13)         POINT TO CALLER'S SAVEAREA
+         FREEMAIN RU,LV=DATALEN,A=(R1),SP=SP000
+         ST    R15,16(,R13)        PUT RC INTO PASSED SAVE AREA
+         LM    R14,R12,12(R13)     RELOAD THE CALLER'S REGISTERS
+         BR    R14                 RETURN TO CALLER
+* - - - - - - - - - - - - - - - - - - - - - - - - *
+*            S U B R O U T I N E S                *
+* - - - - - - - - - - - - - - - - - - - - - - - - *
+************************************************************
+         USING CPPL,R11
+CPPLPTRS DS    0H
+         ST    R11,SAVECPPL           AND THE CPPL ADDRESS ITSELF
+         LA    R6,0
+         BR    R9
+         DROP  R11
+************************************************************
+PGMTITLE DS    0H
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGET),MESSAGET
+         LA    R0,L'MESSAGET+7
+         BAL   R4,MSG
+         MVC   LINE(137),LINE-1
+         MVC   LINET(L'MESSAGEU),MESSAGEU
+         LA    R0,L'MESSAGEU+7
+         BAL   R4,MSG
+         BR    R9
+************************************************************
+*        SET UP IOPL FOR PUTLINE                           *
+************************************************************
+         SPACE
+         USING CPPL,R11
+SETIOPL  LA    R15,MYIOPL
+         USING IOPL,R15
+         MVC   IOPLUPT(4),CPPLUPT
+         MVC   IOPLECT(4),CPPLECT
+         DROP  R11
+         LA    R0,MYECB
+         ST    R0,IOPLECB
+         XC    MYECB,MYECB
+         LA    R0,MYPTPB
+         ST    R0,IOPLIOPB
+         DROP  R15
+         SPACE
+         L     R15,CVTPTR          POINT TO CVT                  JDM1
+         USING CVTMAP,R15          GET ADDRESSABILITY            JDM1
+         TM    CVTPUTL,X'80'       IS PUTLINE LOADED? (VS2)      JDM1
+         BNO   PUTLOAD             NO - BRANCH TO LOAD
+         L     R15,CVTPUTL         YES - USE CVTPUTL             JDM1
+         DROP  R15                                               JDM1
+         B     PUTLOADX            BRANCH AROUND LOAD
+PUTLOAD  LA    R0,=CL8'IKJPUTL '
+         LOAD  EPLOC=(0)
+         LR    R15,R0              GET ENTRY ADDRESS
+         LA    R15,0(,R15)         CLEAR HI BYTE FOR DELETE ROUTINE
+PUTLOADX ST    R15,MYPUTLEP        SAVE PUTLINE ENTRY ADDRESS
+         BR    R9
+         SPACE
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+************************************************************
+*        PUTMSG ROUTINE                                    *
+************************************************************
+         SPACE
+PUTMSG   STM   R14,R1,PUTSAVE
+         XC    MYOLD(8),MYOLD
+         XC    MYSEG1(4),MYSEG1
+         MVC   MYPTPB(12),MODLPTPM
+         LA    R14,1               NO. OF MESSAGE SEGMENTS
+         ST    R14,MYOLD
+         LA    R14,MYSEG1          POINT TO 1ST SEGMENT
+         ST    R14,MYOLD+4
+         LR    R14,R0              LENGTH IN R0
+         LA    R14,4(,R14)         ADD 4
+         LA    R15,MYSEG1+4
+         CLC   0(3,R1),=C'IKJ'     IS DATA PRECEEDED BY MESSAGE ID?
+         BE    *+16                YES - BRANCH
+         LA    R14,1(,R14)         ADD 1 TO LENGTH
+         MVI   0(R15),C' '         INSERT LEADING BLANK
+         LA    R15,1(,R15)         BUMP POINTER
+         STH   R14,MYSEG1
+         LR    R14,R0
+         BCTR  R14,0
+         B     *+10
+         MVC   0(0,R15),0(R1)      MOVE MESSAGE IN
+         EX    R14,*-6
+         LA    R1,MYIOPL
+         L     R15,MYPUTLEP
+         SPACE
+         PUTLINE PARM=MYPTPB,OUTPUT=(MYOLD),ENTRY=(15),MF=(E,(1))
+         SPACE
+         LM    R14,R1,PUTSAVE
+         BR    R14
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+************************************************************
+*        PUTLINE ROUTINE                                   *
+************************************************************
+         SPACE
+PUTLINE  STM   R14,R1,PUTSAVE
+         XC    MYSEG1(4),MYSEG1
+         MVC   MYPTPB(12),MODLPTPB
+         LR    R14,R0              LENGTH IN R0
+         LA    R14,4(,R14)         ADD 4
+         STH   R14,MYSEG1
+         LR    R14,R0
+         BCTR  R14,0
+         B     *+10
+         MVC   MYSEG1+4(0),0(R1)   MOVE TEXT IN
+         EX    R14,*-6
+         LA    R1,MYIOPL
+         L     R15,MYPUTLEP
+         SPACE
+         PUTLINE PARM=MYPTPB,OUTPUT=(MYSEG1,DATA),ENTRY=(15),MF=(E,(1))
+         SPACE
+         LM    R14,R1,PUTSAVE
+         BR    R14
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+MSG      LA    R1,LINE             WRITE A LINE USING PUTLINE FACILITY
+*        LOAD LENGTH OF MESSAGE INTO R0 BEFORE CALLING THIS ROUTINE.
+         BAL   R14,PUTLINE
+         MVC   LINE(137),LINE-1
+         BR    R4
+         SPACE
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+** ---------------------------------------------------------------- **
+HEX      DS    0H                  Display hex values.
+         ST    R9,SAVER9B
+         MVC   1(1,R15),0(R1)      Move byte.
+         UNPK  0(3,R15),1(2,R15)   Unpack.
+         TR    0(2,R15),HEXTAB-240
+         LA    R15,2(,R15)         Increment output pointer.
+         LA    R1,1(,R1)           Increment input pointer.
+         BCT   R0,HEX              Decrement length, then loop.
+         MVI   0(R15),C' '         Blank the trailing byte.
+         L     R9,SAVER9B
+         BR    R9                  Return to caller.
+HEXTAB   DC    C'0123456789ABCDEF' Translate table.
+** ---------------------------------------------------------------- **
+         LTORG
+* - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - *
+FULLZERO DC    F'0'
+MSGLINE  DC    CL23'My Userid is:         '    CONSTANT PART OF MESSAGE
+MSGLINS  DC    CL23'System id is:         '    CONSTANT PART OF MESSAGE
+MSGLINK  DC    CL23'System FMID :         '    CONSTANT PART OF MESSAGE
+MSGLINL  DC    CL23'System level:         '    CONSTANT PART OF MESSAGE
+MSGLINA  DC    CL23'My ASID is  :         '    CONSTANT PART OF MESSAGE
+MSGLINP  DC    CL23'Logon PROC  :         '    CONSTANT PART OF MESSAGE
+MSGLINM  DC    CL23'CPU Model   :         '    CONSTANT PART OF MESSAGE
+MSGLINR  DC    CL23'SYSRES Unit :         '    CONSTANT PART OF MESSAGE
+MSGLINV  DC    CL23'SYSRES Vol  :         '    CONSTANT PART OF MESSAGE
+MSGLINY  DC    CL23'Security    :         '    CONSTANT PART OF MESSAGE
+MSGLINU  DC    CL23'Session from:         '    CONSTANT PART OF MESSAGE
+MSGLINT  DC    CL23'Terminal ID :         '    CONSTANT PART OF MESSAGE
+MSGLIND  DC    CL23'Diagnostic  :         '    CONSTANT PART OF MESSAGE
+MSGLIN8  DC    CL24'8-Char Usids:          '   CONSTANT PART OF MESSAGE
+MSGLINF  DC    CL23'My Prefix is:         '    CONSTANT PART OF MESSAGE
+MSGLCLWA DC    CL23'LWA Createby:         '    CONSTANT PART OF MESSAGE
+MESSAGET DC    C'  MYID - Ver. 2.9D         '
+MESSAGEU DC    C'  ---- - ---------         '
+ZEROES   DC    XL8'00'
+MSLWAC1  DC    CL26'01 Created by LOGON      '
+MSLWAC2  DC    CL26'02 Created by Batch TMP  '
+MSLWAC3  DC    CL26'03 Created by TSO ENV SRV'
+MSLWAC4  DC    CL26'04 Created by PARMLIB cmd'
+MSLWAC5  DC    CL26'05 Created by PARMLIB IPL'
+*
+MODLPTPM PUTLINE OUTPUT=(1,TERM,SINGLE,INFOR),                         X
+               TERMPUT=(EDIT,WAIT,NOHOLD,NOBREAK),MF=L
+         SPACE
+MODLPTPB PUTLINE OUTPUT=(1,TERM,SINGLE,DATA),                          X
+               TERMPUT=(EDIT,WAIT,NOHOLD,NOBREAK),MF=L
+*
+         SPACE 1
+SAVEAREA DSECT
+         DS    18F                 DEFINE MY SAVEAREA - 18 FULLWORDS
+SAVECPPL DS    F                   SAVE THE CPPL
+SAVEUPT  DS    F                   SAVE FOR IKJIFRIF
+SAVEPSCB DS    F                   SAVE FOR IKJIFRIF
+HEXSAVE  DS    3F                  SAVE FOR HEX MACRO
+SAVER9A  DS    F
+SAVER9B  DS    F
+SAVEECT  DS    F                   SAVE FOR IKJIFRIF
+CMBUFAD  DS    F                   COMMAND BUFFER ADDRESS
+MESSAGE  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGS  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGK  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGL  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGA  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGP  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGM  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGR  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGV  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGY  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGU  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGD  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGT  DS    CL23                VARIABLE MESSAGE AREA
+MESSAG8  DS    CL24                VARIABLE MESSAGE AREA
+MESSAGF  DS    CL23                VARIABLE MESSAGE AREA
+MESSAGW  DS    CL23                VARIABLE MESSAGE AREA
+*
+FLAG1    DS    X
+CLWA     DC    XL1'00'
+OUTAREA  DS    CL8
+SAVE14T1 DS    D
+MYPPL    DS    7F
+MYANS    DS    F
+MYECB    DS    F                   USED BY PUTLINE ROUTINE
+MYIOPL   DS    4F                  USED BY PUTLINE ROUTINE
+MYPTPB   DS    3F                  USED BY PUTLINE ROUTINE
+MYPUTLEP DS    F                   USED BY PUTLINE ROUTINE
+MYOLD    DS    2F                  USED BY PUTLINE ROUTINE
+MYSEG1   DS    2H,CL130            USED BY PUTLINE ROUTINE
+PUTSAVE  DS    4F                  USED BY PUTLINE ROUTINE
+LINEB    DS    C                   LINE-1
+LINE     DS    CL137
+LINET    EQU   LINE+7
+         DS    0D                  ALIGN ON DOUBLEWORD
+DATALEN  EQU   *-SAVEAREA          DEFINE LENGTH OF VARIABLE STORAGE
+*
+         CVT   DSECT=YES           CVT mapping macro
+         IKJTCB                    TCB mapping macro
+         IKJCPPL                   CPPL
+         IKJIOPL                   IOPL
+         IKJUPT                    UPT
+         IKJECT                    ECT
+         IEZJSCB                   JSCB mapping macro
+         IKJPSCB                   PSCB mapping macro
+         END

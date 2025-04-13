@@ -1,0 +1,354 @@
+LOKSES   TITLE 'LOKSES - TSO COMMAND TO LOCK THE TERMINAL'
+***********************************************************************
+*                                                                     *
+*   LOKSES - TSO COMMAND TO MAKE TERMINAL LOCKED IN USER'S ABSENCE.   *
+*            USER SIMPLY TYPES LOKSES, AND THE PROGRAM ASKS FOR THE   *
+*            PASSWORD.                                                *
+*                                                                     *
+*          - LOKSES WILL UNLOCK THE SESSION UNDER THE FOLLOWING       *
+*            CIRCUMSTANCES:                                           *
+*                                                                     *
+*            1.  YOU ENTERED A MASTER PASSWORD                        *
+*                                                                     *
+*            2.  YOU ENTERED YOUR RACF LOGON PASSWORD                 *
+*                                                                     *
+*            3.  IF THE TSB PASSWORD AREA (TSB +X'58') CONTAINS       *
+*                A NON-BLANK PASSWORD WHICH MATCHES WHAT YOU          *
+*                ENTERED (FARFETCHED BUT DOABLE)                      *
+*                                                                     *
+***********************************************************************
+*  Changes:   02/11/21 - Make sure that the backdoor passwords        *
+*                        are uppercased, in anticipation of having    *
+*                        mixed case passwords.  So far all RACF       *
+*                        passwords are uppercased, but we are trying  *
+*                        to make it easier to adjust later.           *
+*                                                                     *
+***********************************************************************
+*  Notes:                                                             *
+*                                                                     *
+*  Master password is FAKEPASS - THIS WILL ALWAYS GET YOU OUT.        *
+*                                                                     *
+*  Support for 8-character userids has been provided (new with        *
+*  z/OS 2.3).                                                         *
+*                                                                     *
+***********************************************************************
+*                                                                     *
+*  Note:  Putting a non-blank "password" into the TSB password        *
+*         field:                                                      *
+*                                                                     *
+*  To make case 3 (above) doable....                                  *
+*  we created the FPASS command to put a "fake password" into         *
+*  the TSB, which can be used to get the terminal out of LOKSES.      *
+*                                                                     *
+*  We can also put the real password into the TSB; we can             *
+*  issue the command ZAPLWA P (in this file) and relogon.             *
+*  To undo the effect of ZAPLWA P, enter command:  ZAPLWA PF and      *
+*  relogon.  ZAPLWA PF plus a re-logon will remove the actual RACF    *
+*  password from the TSB.                                             *
+*                                                                     *
+*  In order to put a "fake password" into the TSB, so LOKSES will     *
+*  use it, use the 'FPASS fakepwd' command included here.  The        *
+*  fake password will only be usable for the current LOGON, and it    *
+*  will have to be redone the next time you LOGON.  (But you can      *
+*  put in a different fake password, the next time--more secure.)     *
+*  Recommendation:  Don't use the fake password.  If it is not the    *
+*  same as your real LOGON password, you won't be able to reconnect   *
+*  your session to a different terminal.  The command FPASS - (dash)  *
+*  will clear the TSB password area to blanks.                        *
+*                                                                     *
+***********************************************************************
+         SPACE 1
+LOKSES   CSECT
+         YREGS
+         USING LOKSES,R12
+         STM   R14,R12,12(R13)
+         LR    R12,R15
+         LR    R10,R13
+         LA    R13,SAVE
+         ST    R13,8(,R10)
+         ST    R10,4(,R13)
+         SPACE 1
+         MVC   CPSWD(8),=C'        '   INITIALIZE AREA
+* --- >
+         TESTAUTH FCTN=1               ARE WE AUTHORIZED
+         LTR   R15,R15
+         BZ    GOFURTHR                IF NOT SEND MESSAGE
+         TPUT  =C'This command must be run authorized',35
+         B     EXIT
+* --- >
+GOFURTHR DS    0H
+         GTSIZE ,                  GET TERMINAL DEPTH.
+         ST    R1,OLDWIDTH         SAVE WIDTH.
+         LTR   R4,R0               SAVE TERMINAL DEPTH.
+         BZ    NOT3270             B IF NOT 3270
+         STFSMODE ON,INITIAL=YES   TELL VTAM WE ARE IN FULLSCREEN MODE.
+         CLI   OLDWIDTH+3,132      IS WIDTH 132?
+         BNE   NOT3270             B IF NOT.
+         MVC   ADDR1,=X'D66B'      MOVE MOD 5 VERSION OF ROW 11, ...
+*                                  ... LAST COLUMN.
+         MVC   QADDR2,=X'C24B'     MOVE MOD 5 ROW 2, COL 8.
+         MVC   QADDR3,=X'C44F'     MOVE MOD 5 ROW 3, COL 8.
+         MVC   QADDR4,=X'C6D3'     MOVE MOD 5 ROW 4, COL 8.
+         MVC   QADDR5,=X'C8D7'     MOVE MOD 5 ROW 5, COL 8.
+         MVC   QADDR6,=X'4A5B'     MOVE MOD 5 ROW 6, COL 8.
+         MVC   QADDR7,=X'4C5F'     MOVE MOD 5 ROW 7, COL 8.
+         MVC   QADDR8,=X'4EE3'     MOVE MOD 5 ROW 8, COL 8.
+         MVI   MSG,X'7E'           MAKE CMD "ERASE WRITE/ALT".
+NOT3270  L     R3,16               POINT TO CVT.
+         L     R3,0(,R3)           POINT TO TCB/ASCB WORDS.
+         L     R5,0(,R3)           POINT TO TCB.
+         L     R6,X'B4'(,R5)       POINT TO JSCB.
+         L     R5,X'108'(,R6)      POINT TO PSCB.
+         USING PSCB,R5
+         CLI   PSCBUSER,X'6E'      8-CHARACTER USERID?
+         BE    EIGHTCH
+         MVC   USERID,PSCBUSER     MOVE USERID (JOBNAME).
+         MVC   USERIDT,PSCBUSER    MOVE TO OTHER PLACE
+         MVC   USERIDL(1),PSCBUSRL MOVE USERID LENGTH
+         SR    R0,R0               LOAD LENGTH ...
+         IC    R0,PSCBUSRL         ... OF USERID.
+         B     EIGHTEND
+EIGHTCH  DS    0H
+         MVC   USERID(8),PSCBUSER+X'54'   MOVE USERID (JOBNAME).
+         MVC   USERIDT(8),PSCBUSER+X'54'  MOVE TO OTHER PLACE
+         MVC   USERIDL(1),PSCBUSER+X'20'  MOVE USERID LENGTH
+         SR    R0,R0                   LOAD LENGTH ...
+         IC    R0,PSCBUSER+X'20'   ... OF USERID.
+EIGHTEND DS    0H
+         LA    R1,USERID           MAKE POINTER TO ...
+         AR    R1,R0               ... END OF USERID.
+         MVC   0(XMSGL,R1),XMSG    MOVE END OF MESSAGE.
+         LA    R1,USERIDT+1        MAKE POINTER TO ...
+         AR    R1,R0               ... END OF USERID.
+         MVC   0(L'XMSGT,R1),XMSGT MOVE END OF MESSAGE.
+         TM    PSCBATR1,PSCBCTRL   OPER PRIV?
+         BZ    NOTOPER0            B IF NOT.
+         IDENTIFY EP=RETIME,ENTRY=RETIME IDENTIFY TIMER RETRY TASK
+         ATTACH EP=RETIME          ATTACH TIMER RETRY TASK.
+         ST    R1,SUBTASKA         SAVE TCB ADDRESS.
+NOTOPER0 DS    0H
+         L     R3,12(,R3)          POINT TO MY ASCB.
+         L     R1,X'B0'(,R3)       POINT TO JOBNAME.
+         MVC   ASID,X'24'(R3)      MOVE ASID.
+         MVC   ASID+2(2),ASID      COPY MY ASID.
+         MVC   ASID1,ASID          COPY MY ASID.
+         MVC   ASID1+2(2),ASID     COPY MY ASID.
+         L     R3,X'3C'(,R3)       POINT TO TSB.
+         LA    R3,X'58'(,R3)       POINT TO PASSWORD.
+         MODESET KEY=ZERO
+         MVC   CPSWD(8),0(R3)      PASSWORD INTO PGM FOR COMPARE.
+         MODESET KEY=NZERO
+         LA    R1,STAXLIST         POINT TO STAX LIST.
+         STAX  ATTNEXIT,MF=(E,(1)) SET ATTN EXIT FOR TTY ONLY.
+         STTMPMD ON,KEYS=ALL       ALLOW INPUT OF CLEAR KEY, PA1.
+         STATTN LINES=0,INPUT=0,TENS=0  KILL TCAM SIMULATED ATTN.
+         LTR   R4,R4               TTY?
+         BNZ   LOOP0               B IF NOT.
+         STSIZE SIZE=255           SET GREAT WIDTH FOR TTY.
+LOOP0    DS    0H
+         LTR   R4,R4               IS IT A TTY?
+         BZ    TTY                 B IF YES.
+         TPUT  MSG,MSGL,NOEDIT     SAY: ENTER PASSWORD.
+         B     GET
+TTY      TPUT  MSGTTY,MSGTTYL,ASIS SAY: ENTER PASSWORD.
+GET      TGET  IN,8                GET PASSWORD.
+DATA     TCLEARQ INPUT             CLEAR INPUT BUFFERS.
+NOTTIME  OC    IN,=CL8' '          UPPERCASE IT.
+*
+**-->>   --------------   below    GET ENTERED PASSWORD LENGTH
+         ST    R9,SAVER9A
+         LA    R9,IN+7             POINT TO LAST LETTER IN IN
+         LA    R11,8               INITIAL LENGTH VALUE
+LENLOOP  DS    0H
+         CLI   0(R9),X'40'         IS LAST LETTER A BLANK?
+         BNE   LENLEND             NO. STOP HERE.
+         BCTR  R9,0                BACK UP ONE LETTER
+         BCT   R11,LENLOOP         TRY NEXT TO LAST IF BLANK
+LENLEND  DS    0H                  FINISHED.
+         STC   R11,INLEN           SAVE INPUT LENGTH
+LENPASS  DS    0H
+         L     R9,SAVER9A
+         LTR   R11,R11             ZERO LENGTH, BYPASS RACF
+         BZ    BYPRACF
+**-->>   --------------   above    GET ENTERED PASSWORD LENGTH
+*
+         MVC   TSBPWD,MPWD         MOVE BACKDOOR PWD.
+         XC    TSBPWD,MSK          UN-MASK IT.
+         OC    TSBPWD,=CL8' '      UPPERCASE IT
+         CLC   IN,TSBPWD           USER PWD IS BACKDOOR?
+         BE    OK                  B IF YES. UNLOCK THE TERMINAL.
+         MVC   TSBPWD,BKDR         MOVE BACKDOOR PWD.
+         XC    TSBPWD,MSK          UN-MASK IT.
+         OC    TSBPWD,=CL8' '      UPPERCASE IT
+         CLC   IN,TSBPWD           USER PWD IS BACKDOOR?
+         BE    OK                  B IF YES. UNLOCK THE TERMINAL.
+         MVC   TSBPWD,LKSS         MOVE BACKDOOR PWD.
+         XC    TSBPWD,MSK          UN-MASK IT.
+         OC    TSBPWD,=CL8' '      UPPERCASE IT
+         CLC   IN,TSBPWD           USER PWD IS BACKDOOR?
+         BE    OK                  B IF YES. UNLOCK THE TERMINAL.
+         MVC   TSBPWD,SECU         MOVE SECURE PWD
+         XC    TSBPWD,MSK          UN-MASK IT.
+         OC    TSBPWD,=CL8' '      UPPERCASE IT
+         CLC   IN,TSBPWD           USER PWD IS BACKDOOR?
+         BE    OK                  B IF YES. UNLOCK THE TERMINAL.
+         CLC   CPSWD(8),IN         IS THIS THE TSB PASSWORD?
+         BE    OK                  YES. UNLOCK THE TERMINAL.
+*
+* ---- > --------------   below    VERIFY RACF PASSWORD
+*      GET STORAGE TO BUILD RACINIT PARAMETERS
+         GETMAIN RU,LV=RACFWORK         GET WORKING STORAGE
+         LR    R7,R1                    SAVE ADDR OF STORAGE
+         USING RACFPARM,R7              SET BASE REGISTER
+*      INITIALIZE CREATE FORMAT OF RACINIT MACRO
+         XC    RACREATE(56),RACREATE    CLEAR RACINIT/CREATE FIELDS
+         MVC   RACREATE(4),=X'38000000' SET RACINIT/CREATE PARMS
+         LA    R8,USERIDL               GET ADDR OF USER I.D.
+         ST    R8,RACREATE+4                 AND STORE IN RACINIT
+         LA    R4,INLEN                 GET ADDR OF PASSWORD
+         ST    R4,RACREATE+8                 AND STORE IN RACINIT
+         LA    R3,RACFACEE              GET ACEE ADDRESS
+         ST    R3,RACREATE+52                AND STORE IN RACINIT
+*      INITIALIZE DELETE FORMAT OF RACINIT MACRO
+         XC    RACDELET(56),RACDELET    CLEAR RACINIT/DELETE FIELDS
+         MVC   RACDELET(4),=X'38000080' SET RACINIT/DELETE PARMS
+         LA    R3,RACFACEE              GET ACEE ADDRESS
+         ST    R3,RACDELET+52                AND STORE IN RACINIT
+*      ISSUE RACINIT MACRO TO VALIDATE THIS USER I.D. & PASSWORD
+*        RACINIT PASSWRD=USERADDR,USERID=PSWDADDR,ACEE=RACFACEE,
+*              ENVIR=CREATE
+         LA    R8,RACREATE              POINT TO LIST FROM OF RACINIT
+         RACINIT MF=(E,(8))             ISSUE RACINIT TO VERIFY UID
+         LR    R9,R15                   SAVE RACINIT RETURN CODE
+*        RACINIT ENVIR=DELETE,ACEE=RACFACEE
+         LA    R8,RACDELET              POINT TO LIST FROM OF RACINIT
+         RACINIT MF=(E,(8))             DELETE THE ABOVE RACF ACEE
+*      PREPARE TO EXIT
+         LR    R1,R7                    RESTORE WORKING STG ADDR
+         FREEMAIN RU,LV=RACFWORK,A=(1)  FREE ACQUIRED STORAGE
+         LTR   R9,R9                    SET RC=RACINIT RETURN CODE
+         BZ    OK
+* ---- > --------------   above    VERIFY RACF PASSWORD
+*
+BYPRACF  DS    0H
+         CLI   IN,C' '             INPUT PASSWORD BLANK?
+         BE    LOOP0               B IF SO.
+         XC    IN(16),IN           CLEAR IN, PWD.
+         B     LOOP0
+OK       XC    IN(16),IN           CLEAR IN, PWD.
+         LTR   R4,R4               THIS A TTY?
+         BZ    TTY1                B IF YES.
+         TPUT  ENDCLEAR,L'ENDCLEAR,FULLSCR CLEAR SCREEN.
+         STFSMODE OFF              TELL VTAM NO MORE FULLSCREEN MODE.
+         TPUT  POSTEND,L'POSTEND,FULLSCR
+TTY1     TM    PSCBATR1,PSCBCTRL   OPER PRIV?
+         BZ    NOTOPER1            B IF NOT.
+         DETACH SUBTASKA           GET RID OF TIMER RETRY SUBTASK.
+NOTOPER1 STTMPMD OFF,KEYS=NO       RESTORE CLEAR, PA1.
+         LTR   R4,R4               TTY?
+         BNZ   EXIT                B IF NOT.
+         STSIZE SIZELOC=OLDWIDTH   RESTORE PROPER WIDTH.
+EXIT     L     R13,SAVE+4
+         LM    R14,R12,12(R13)
+         SR    R15,R15
+         BR    R14
+         SPACE 1
+ATTNEXIT BR    R14                 IGNORE ATTN.
+         SPACE 1
+RETIME   STM   R14,R12,12(R13)
+         LR    R12,R15
+         DROP  R12
+         USING RETIME,R12
+         LR    R14,R13
+         LA    R13,SAVERET
+         ST    R14,4(,R13)
+         ST    R13,8(,R14)
+         SPACE 1
+RETLOOP  XC    RETECB,RETECB       CLEAR ECB.
+         STIMER REAL,TEXIT,BINTVL=INT  GO TO SLEEP...
+         WAIT  ECB=RETECB              ... FOR 5 MINUTES.
+         B     RETLOOP              WAKE UP AND DO IT AGAIN.
+         SPACE 1
+         DROP  R12
+         USING *,R12
+TEXIT    LR    R12,R15             TIMER RET EXIT.
+         POST  RETECB
+         BR    R14
+         SPACE 3
+         DROP  R12
+         USING LOKSES,R12
+SAVE     DS    9D
+SAVERET  DS    9D                  SAVE AREA FOR SUBTASKA.
+SAVER9A  DS    F
+WORK     DS    D                   WORK DOUBLEWORD.
+INLEN    DS    CL1                 INPUT WORD LENGTH
+IN       DS    CL8                 PASSWORD INPUT AREA.
+TSBPWD   DS    CL8                 PASSWORD COMPARE AREA.
+RETECB   DS    A                   ECB FOR TIMER RETRY ROUTINE.
+SUBTASKA DS    A                   ADDRESS OF SUBTASKA TASK TCB.
+INT      DC    A(5*60*100)         5 MINUTES IN 100THS OF SECONDS.
+BKDR     DC    X'3D3E3C2D3B292926'
+MPWD     DC    X'393E2D3A283E1D1D'
+LKSS     DC    X'2C292D1D3A1DBFBF'
+SECU     DC    X'1D3A3C1B263ABFBF'
+MSK      DC    X'FFFFFFFFFFFFFFFF'
+MSG      DC    X'F503115D7F1140403C4040001D6011'
+QADDR1   DC    X'40C7'             R1, C8.
+QM1      DC    CL68' ',X'11'
+QADDR2   DC    X'C1D7'             R2, C8.
+QM2      DC    CL68' ',X'11'
+QADDR3   DC    X'C2E7'             R3, C8.
+QM3      DC    CL68' ',X'11'
+QADDR4   DC    X'C3F7'             R4, C8.
+QM4      DC    CL68' ',X'11'
+QADDR5   DC    X'C5C7'             R5, C8.
+QM5      DC    CL68' ',X'11'
+QADDR6   DC    X'C6D7'             R6, C8.
+QM6      DC    CL68' ',X'11'
+QADDR7   DC    X'C7E7'             R7, C8.
+QM7      DC    CL68' ',X'11'
+QADDR8   DC    X'C8F7'             R8, C8.
+QM8      DC    CL68' ',X'11'
+ADDR1    DC    X'4D6F'
+         DC    X'1DE4'
+         DC    C'Enter '
+         DC    C'your '
+         DC    C'password for '
+         DC    X'1DE8'
+USERIDL  DC    CL1' '
+USERID   DC    CL8' '
+         DC    C'                           '
+         DC    C'-',X'1D4C13'
+MSGL     EQU   *-MSG
+MSGTTY   DC    C' ',8C'X',C'-Enter your password for  '
+USERIDT  DS    CL8
+         DC    C'                       '
+         DC    X'0D40',8C'W',X'0D40',8C'T'
+         DC    X'0D40',8C'Y',X'0D40',8C'P',X'0D40',8C'Q'
+         DC    X'0D40',8C'%',X'0D40'
+MSGTTYL  EQU   *-MSGTTY
+XMSG     DC    X'1DE4',C'to unlock this terminal'
+XMSGL    EQU   *-XMSG
+XMSGT    DC    C'to unlock terminal'
+ENDCLEAR DC    X'F11140403C40400013'
+POSTEND  DC    X'F1115D7E114040'
+OLDWIDTH DS    F
+STAXLIST STAX  ATTNEXIT,MF=L
+ASID     DC    2H'0'                  FROM AND TO ASIDS.
+ASID1    DC    2H'0'
+CPSWD    DS    CL8
+RPSWD    DS    CL8
+         IKJPSCB
+RACFPARM DSECT
+USERADDR DS    F                        ADDR OF USER I.D.
+PSWDADDR DS    F                        CMD LENGTH + 4
+RACFACEE DS    F                        ADDR OF RACF ACEE CREATED
+RACREATE RACINIT USERID=RACFUSER,PASSWRD=RACFPSWD,ACEE=RACFACEE,       *
+               ENVIR=CREATE,MF=L
+RACDELET RACINIT ENVIR=DELETE,ACEE=RACFACEE,MF=L
+RACFUSER DS    AL(1)
+         DS    CL8
+RACFPSWD DS    AL(1)
+         DS    CL8
+RACFWORK EQU   *-RACFPARM               WORK AREA LENGTH
+         END

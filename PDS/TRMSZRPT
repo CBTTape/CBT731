@@ -1,0 +1,581 @@
+*   TSO COMMAND PROCESSOR TO DISPLAY TERMINAL SIZE OF ALL TSU'S.
+* ------------------------------------------------------------------- *
+*                                                                     *
+*   FUNCTION:   SUPPLY A REPORT OF TERMINAL SIZES FOR ALL             *
+*               LOGGED-ON TSO USERS.                                  *
+*                                                                     *
+*   SYNTAX  :   TRMSZRPT      (NO OPERANDS)                           *
+*                                                                     *
+*   MODE    :   TSO COMMAND - MUST BE APF-AUTHORIZED                  *
+*               PUTLINE INTERFACE USED.  OUTPUT MAY BE TRAPPED.       *
+*                                                                     *
+*               THIS PROGRAM IS IN THE PUBLIC DOMAIN                  *
+*                                                                     *
+*   DATE WRITTEN:    AUG 1, 2021                                      *
+*                                                                     *
+* ------------------------------------------------------------------- *
+         YREGS
+* ------------------------------------------------------------------- *
+         MACRO
+&LABEL   APUT  &MSG,                    @MESSAGE TEXT                  &
+               &LEN,                    @LENGTH OF MESSAGE             &
+               &RSA=,                   OPTIONAL 2 WORD SAVE AREA      &
+               &EPA=                    EPUTL EPA
+.*
+.* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+.*
+.*  --> E@PUT
+.*
+.*  THIS MACRO SETS UP A PARAMETERS AND INVOKES THE EPUTL ROUTINE.
+.*
+.*
+.*  ARGUMENTS: -----------------------------------------------------
+.*
+.*      &MSG : ADDRESS OF MESSAGE TEXT OR A LITERAL
+.*
+.*      &LEN : LENGTH OF MESSAGE TEXT (DEFAULT IS L'&MSG)
+.*
+.*      &RSA :(OPTIONAL) 1 WORD SAVE AREA TO PRESERVE R14 FOR TPUT
+.*            COMPATIBILITY.
+.*
+.*      &EPA :(OPTIONAL) EPA FOR EPUTL ROUTINE
+.*
+.*
+.*   EXAMPLES: -----------------------------------------------------
+.*
+.*      1) APUT  'LITERAL'
+.*
+.*      2) APUT  (R3),80
+.*
+.*      3) APUT  LABEL
+.*
+.*      4) APUT  LABEL,40
+.*
+.*
+.* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+.*
+.*
+.*  LOCAL SET SYMBOLS
+.*
+         LCLC  &SMA                     MESSAGE ADDRESS (REG)
+         LCLC  &SML                     MESSAGE LENGTH (REG)
+         LCLC  &SEP                     EPA (REGISTER)
+.*
+         LCLC  &L1,&L2,&L3              LOCAL LABELS
+.*
+&L1      SETC  'EP'.'&SYSNDX'.'L1'      LOCAL LABELS
+&L2      SETC  'EP'.'&SYSNDX'.'L2'      LOCAL LABELS
+&L3      SETC  'EP'.'&SYSNDX'.'L3'      LOCAL LABELS
+.*
+.*
+.*  MESSAGE ADDRESS
+.*
+         AIF   (T'&LABEL EQ 'O').A0500                      *HMD 11/86*
+.*                                                          *HMD 11/86*
+&LABEL   DS    0H                                           *HMD 11/86*
+.*                                                          *HMD 11/86*
+.A0500   ANOP                                               *HMD 11/86*
+         AIF   ('&MSG' NE '').A2000
+         MNOTE 8,'''&MSG='' MISSING / REQUIRED'
+         MEXIT
+.*
+.A2000   ANOP
+         AIF   ('&MSG'(1,1) NE '(').A2400
+&SMA     SETC  '&MSG'(2,K'&MSG-2)
+         LR    R1,&SMA                  @MESSAGE TEXT
+         AGO   .A2600
+.*
+.A2400   ANOP
+         AIF   ('&MSG'(1,1) NE '''').A2500
+         B     &L3                      BRANCH AROUND MESSAGE
+&L2      DC    C&MSG
+&L3      DS    0H
+         LA    R1,&L2                   @MESSAGE
+         AGO   .A2600
+.*
+.A2500   ANOP
+         LA    R1,&MSG                  @MESSAGE TEXT
+.A2600   ANOP
+.*
+.*  MESSAGE LENGTH
+.*
+         AIF   ('&LEN' NE '').A3000
+         AIF   ('&MSG'(1,1) NE '''').A2800
+         LA    R0,L'&L2                 MESSAGE LENGTH
+         AGO   .A3600
+.*
+.A2800   ANOP
+         AIF   ('&MSG'(1,1) EQ '(').A2900
+         LA    R0,L'&MSG                MESSAGE LENGTH
+         AGO   .A3600
+.*
+.A2900   ANOP
+         MNOTE 8,'''LEN'' MISSING / REQUIRED'
+         MEXIT
+.*
+.A3000   ANOP
+         AIF   ('&LEN'(1,1) NE '(').A3400
+&SML     SETC  '&LEN'(2,K'&LEN-2)
+         LR    R0,&SML                  MESSAGE LENGTH
+         AGO   .A3600
+.*
+.A3400   ANOP
+         LA    R0,&LEN                  MESSAGE LENGTH
+.A3600   ANOP
+.*
+.*  RSA
+.*
+         AIF   ('&RSA' EQ '').A4900
+         ST    R14,&RSA                 SAVE REGS 14
+.A4900   ANOP
+.*
+.*  ENTRY POINT
+.*
+         AIF   ('&EPA' NE '').A5000
+         L     R15,=V(EPUTL)            EPA
+         AGO   .A5600
+.*
+.A5000   AIF   ('&EPA'(1,1) NE '(').A5400
+&SEP     SETC  '&EPA'(2,K'&EPA-2)
+         LR    R15,&SEP                 EPA
+         AGO   .A5600
+.*
+.A5400   ANOP
+         L     R15,&EPA                 EPA
+.*
+.A5600   ANOP
+.*
+.*  CALL LINKAGE
+.*
+.ACALL   BALR  R14,R15                  CALL PUTLINE ROUTINE
+.*
+         AIF   ('&RSA' EQ '').A6900
+         L     R14,&RSA                 RESTORE R14
+.A6900   ANOP
+.*
+.AMEND   MEND
+* ------------------------------------------------------------------- *
+         MACRO
+&NAME    HEX   &TO,&LEN,&FROM
+&NAME    STM   R15,R1,HEXSAVE           Save work registers.
+         LA    R1,&FROM                 Load from address.
+         LA    R0,&LEN                  Load length of hex number.
+         LA    R15,&TO                  Load to address.
+         BAL   R6,HEX                   BAL to routine.
+         LM    R15,R1,HEXSAVE           Restore work registers.
+         MEND
+* ------------------------------------------------------------------- *
+TESTSRB  CSECT
+TESTSRB  RMODE 24
+TESTSRB  AMODE 31
+         STM   R14,R12,12(R13)       Program entry, not re-entrant.
+         LR    R3,R15
+         USING TESTSRB,R3
+         LR    R14,R13
+         LA    R13,SAVEAREA
+         ST    R14,SAVEAREA+4
+* ------------------------------------------------------------------- *
+         TESTAUTH FCTN=1             Are we authorized?
+         LTR   R15,R15               Test the return code.
+         BNZ   NOTAUTH               Not zero, tell not authorized.
+         B     INITCON               Go on with regular processing.
+NOTAUTH  DS    0H
+         APUT  =CL19'MUST RUN AUTHORIZED',19
+         B     ENDJOB
+* ------------------------------------------------------------------- *
+INITCON  DS    0H                    Initialize constants.
+         MVI   JOBNAME-1,X'40'
+         MVC   JOBNAME,JOBNAME-1
+* ------------------------------------------------------------------- *
+PRTITLE  DS    0H                                                     *
+         APUT  =C'   TSU TERMINAL SIZE REPORT',27
+         APUT  =C'   --- -------- ---- ------',27
+* ------------------------------------------------------------------- *
+*       Begin preparation of SRB - Move its code to CSA               *
+* ------------------------------------------------------------------- *
+         MODESET MODE=SUP,KEY=ZERO
+         LA    R0,TSUEND
+         STORAGE OBTAIN,                                               X
+               LENGTH=(R0),                                            X
+               ADDR=(R8),                                              X
+               SP=228
+         ST   R8,SRBPTR
+*
+*
+*
+         LR   R9,R0
+         LA   R6,TRMSZRPT
+         LR   R7,R0
+         MVCL R8,R6                         MOVE TO CSA
+*******************************************************************
+*                   Cycle through the ASVT                        *
+*******************************************************************
+         L     R9,CVTPTR         Point to CVT  - X'10'
+         USING CVT,R9             Map CVT
+         L     R9,CVTASVT        Point to ASVT
+         DROP  R9                Tell ASMBLR to stop using R9 for CVT
+         USING ASVT,R9           Map ASVT
+         LA    R5,ASVTENTY       Point to first entry in table
+         L     R8,ASVTMAXU       Load max number of ASID's
+         CH    R8,ASIDBIN        Is current ASID too big?
+         BNL   ASVTLOOP          No. Go on processing.
+         B     ENDFREE           Remember to clean up.
+* ------------------------------------------------------------------- *
+ASVTLOOP DS    0H
+         LR    R7,R5             Save address in R7 for later
+*
+         TM    0(R5),ASVTAVAL    Is this address space being used?
+         BO    NEXTASCB          No. Go try next one.
+         L     R7,0(,R7)         Yes. Look at its ASCB.
+         USING ASCB,R7
+         CLC   ASCBTSB,=F'0'     Does it have a TSB?
+         BNE   HASTSB            Not zero. It is a TSU.
+         B     NEXTASCB          Zero. So it's not a TSU.
+HASTSB   DS    0H
+         L     R9,ASCBASSB       This is one we want. Go there.
+         USING ASSB,R9
+         MVC   STOKEN,ASSBSTKN   Get the STOKEN for the schedule.
+*
+         IEAMSCHD EPADDR=SRBPTR,                                       X
+               ENV=STOKEN,                                             X
+               TARGETSTOKEN=STOKEN,                                    X
+               PRIORITY=GLOBAL,                                        X
+               SYNCH=YES
+* ------------------------------------------------------------------- *
+*       Back from the SRB - Get the results for this ASID             *
+* ------------------------------------------------------------------- *
+*                                      Move SRB stuff into our program
+         L     R10,SRBPTR
+         MVC   STORRO(1),STORR-TRMSZRPT(R10)
+         MVC   STORCO(1),STORC-TRMSZRPT(R10)
+         MVC   ASID(2),ASIDZ-TRMSZRPT(R10)
+         MVC   JOBNAME(8),JOBNAM-TRMSZRPT(R10)
+* ------------------------------------------------------------------- *
+*                                      Now-use-the-data-obtained.
+* ------------------------------------------------------------------- *
+         MVC   MESASID+8(8),JOBNAME    Move in Jobname
+         HEX   MESASID+24,2,ASID       Move in ASID
+         APUT  MESASID,L'MESASID       Print message
+*                                      Deal rows and columns
+         XR    R0,R0                   Clear work registers
+         XR    R1,R1
+         IC    R0,STORRO               Put size into full registers
+         IC    R1,STORCO
+         ST    R0,ROWS                 Store the quantities away
+         ST    R1,COLS                   for safekeeping
+         LR    R6,R0                   Get number of rows
+         CVD   R6,DWORK                Convert to packed
+         MVC   NUMROWS,MASK7A          EDIT mask
+         ED    NUMROWS,DWORK+5         Display number in message
+         MVI   NUMROWS+6,C' '          Blank out the end garbage
+         MVC   MESROWS+18(7),NUMROWS   Move in the number of rows
+         LR    R6,R1                   Get number of columns
+         CVD   R6,DWORK                Convert to packed
+         MVC   NUMCOLS,MASK7A          EDIT mask
+         ED    NUMCOLS,DWORK+5         Display number in message
+         MVI   NUMCOLS+6,C' '          Blank out the end garbage
+         MVC   MESCOLS+18(7),NUMCOLS   Move in the number of columns
+*                                      Write messages and separator
+         APUT  MESROWS,L'MESROWS
+         APUT  MESCOLS,L'MESCOLS
+         APUT  MESSEP,L'MESSEP
+*
+NEXTASCB DS    0H
+         LA    R5,4(,R5)               Point to next entry in ASVT
+         BCT   R8,ASVTLOOP             Go check next ASVT entry
+* ------------------------------------------------------------------- *
+*                     E N D   O F   J O B                             *
+* ------------------------------------------------------------------- *
+ENDFREE  DS    0H
+         L     R7,SRBPTR
+         STORAGE RELEASE,ADDR=(R7),LENGTH=TSUEND,SP=228
+         MODESET MODE=PROB,KEY=NZERO
+ENDJOB   L     R13,4(,R13)
+         LM    R14,R12,12(R13)
+         BR    R14
+* ------------------------------------------------------------------- *
+*                       C O N S T A N T S                             *
+* ------------------------------------------------------------------- *
+SRBPTR   DS    A
+STOKEN   DS    XL8
+SAVEAREA DS    18F
+HEXSAVE  DS    3F                  SAVE FOR HEX MACRO
+STORRO   DC    XL1'00'
+STORCO   DC    XL1'00'
+ASIDBIN  DS    0XL2
+ASID     DC    XL2'00'
+DWORK    DS    D
+MASK7A   DC    XL7'40202020212020'
+ROWS     DS    F
+COLS     DS    F
+         DC    X'40'
+JOBNAME  DS    CL8' '
+NUMROWS  DS    CL7
+NUMCOLS  DS    CL7
+MESASID  DC    C'  User:           ASID:       '
+MESROWS  DC    C'This terminal has         Rows'
+MESCOLS  DC    C'This terminal has         Columns'
+MESSEP   DC    C'        * - * - * - *            '
+         DC    X'40'
+OUTPUT   DC    CL80' '
+* ------------------------------------------------------------------- *
+*            H E X    D I S P L A Y    S U B R O U T I N E            *
+* ------------------------------------------------------------------- *
+HEX      DS    0H                  Display hex values.
+         ST    R6,SAVER6B
+         MVC   1(1,R15),0(R1)      Move byte.
+         UNPK  0(3,R15),1(2,R15)   Unpack.
+         TR    0(2,R15),HEXTAB-240
+         LA    R15,2(,R15)         Increment output pointer.
+         LA    R1,1(,R1)           Increment input pointer.
+         BCT   R0,HEX              Decrement length, then loop.
+         MVI   0(R15),C' '         Blank the trailing byte.
+         L     R6,SAVER6B
+         BR    R6                  Return to caller.
+HEXTAB   DC    C'0123456789ABCDEF' Translate table.
+SAVER10A DS    F
+SAVER6B  DS    F
+******************************************************************
+*         SRB CODE                                               *
+******************************************************************
+TRMSZRPT DS    0D
+         DROP  R3
+         LR    R12,R15             LOAD ENTRY POINT INTO BASE REGISTER
+         USING TRMSZRPT,R12        TELL THE ASSEMBLER R12 IS BASE
+         MVI   STORR,X'00'         INITIALIZE VARIABLES
+         MVI   STORC,X'00'
+         MVC   ASIDZ(2),=X'0000'
+         MVC   JOBNAM(8),BLANKS
+RUNBLANK DS    0H
+         L     R3,X'224'           POINT TO ASCB
+         MVC   ASIDZ(2),X'24'(R3)  GET ITS ASID
+         L     R4,X'B0'(,R3)       POINT TO ASCBJBNS
+         MVC   JOBNAM(8),0(R4)     MOVE IN JOBNAME
+         L     R3,X'3C'(,R3)       POINT TO TSB
+         LTR   R3,R3               ANY TSB?
+         BZ    RETURN
+         CLC   =X'0000',X'66'(R3)  IS THE TERMSIZE BASIC?
+         BNE   REALSIZ             NO. GET THE MODIFIED TERMSIZE
+         MVC   STORR,X'64'(R3)     GET THE BASIC TERMSIZE
+         MVC   STORC,X'65'(R3)
+         B     RETURN
+REALSIZ  MVC   STORR,X'66'(R3)     RETRIEVE NUMBER OF ROWS
+         MVC   STORC,X'67'(R3)     RETRIEVE NUMBER OF COLUMNS
+RETURN   DS    0H
+         BR    R14                 RETURN TO CALLER
+BLANKS   DC    CL8' '
+JOBNAM   DC    CL8' '
+STORR    DS    X
+STORC    DS    X
+ASIDZ    DS    H
+         LTORG
+TSUEND   EQU   *-TRMSZRPT
+* ------------------------------------------------------------------- *
+         IHAASCB
+         IHAASSB
+         IHAASVT
+         CVT  LIST=YES,DSECT=YES
+         END
+EPUTL    TITLE 'PUTLINE FOR FEWER THAN 83 ARGUMENTS IN THE KEY OF C MAJ&
+               OR'
+EPUTL    CSECT                                              *HMD 10/85*
+         LCLB  &XA                                          *HMD 10/85*
+&XA      SETB  1                  SET TO ZERO ON NON/XA     *HMD 10/85*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+*
+*  MODULE NAME  . . . . EPUTL
+*
+*  ALIASES  . . . . . . NONE
+*
+*  DATE WRITTEN . . . . 06/85
+*  UPDATED      . . . . 04/88                                  HD APR88
+*  CLEANED A BIT  . . . 08/17
+*
+*  AUTHOR . . . . . . . JIM ELSWORTH
+*  UPDATER  . . . . . . HOWARD M. DEAN                         HD APR88
+*
+*  ENVIRONMENT  . . . . TSO COMMAND PROCESSOR
+*
+*  PURPOSE:
+*    ALLOW AN EASY INTERFACE TO PUTLINE ROUTINE
+*
+*
+*  DESCRIPTION:
+*    BUILDS PUTLINE PARAMETER LIST BASED ON INPUT ARGUMENTS.
+*    ISSUES SINGLE LINE PUTLINE.
+*
+*
+*  ATTRIBUTES:
+*    REENTRANT
+*
+*  FEATURES:
+*    WILL RUN UNDER BATCH TMP SINCE PUTLINE USED INSTEAD OF TPUT.
+*
+*  CALLED MODULES:
+*    PUTLINE
+*
+*  ASSUMPTIONS:
+*    CALLED BY A TSO-CP THAT IS OBSERVING STANDARD LINKAGE
+*
+*  ABENDS:
+*    POSSIBLE 0CX IF BAD ARGUMENTS
+*
+*  CAVEATS:
+*    UNPREDICTABLE RESULTS IF FIRST PROGRAM RUNNING UNDER THIS TCB
+*    DID NOT SAVE (14,12) BEFORE R1 WAS MODIFIED.
+*
+*
+*  INPUT ARGUMENTS:
+*    1)  R1 : ADDRESS OF MESSAGE TEXT
+*    2)  R0 : LENGTH OF MESSAGE TEXT
+*    3) R13 : STANDARD OS SAVE AREA
+*    4) R14 : RETURN ADDRESS
+*    5) R15 : ENTRY ADDRESS
+*
+*               ( CONTINUED ... )
+*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+         EJECT
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+*
+*
+*  OUTPUT ARGUMENT: RETURN CODE FROM PUTLINE OR
+*
+RCBA     EQU   100                 BAD MESSAGE ADDRESS
+RCBL     EQU   104                 MESSAGE LENGTH <1 OR >MAXMSG
+*
+MAXMSG   EQU   255                 MAXIMUM MESSAGE LENGTH
+*
+*
+*  REGISTERS USED:
+*
+R0       EQU   0                   MESSAGE LENGTH AT ENTRY
+R1       EQU   1                   MESSAGE ADDRESS AT ENTRY
+R2       EQU   2                   WORK
+R3       EQU   3                   WORK
+RMA      EQU   4                   @MESSAGE TEXT
+RML      EQU   5                   MESSAGE LENGTH
+RUPT     EQU   6                   @UPT (USER PROFILE TABLE)
+RECT     EQU   7                   @ECT
+R12      EQU   12                  CSECT BASE
+R13      EQU   13                  @SAVE AREA AND DYNAMIC WORK AREA
+R14      EQU   14                  WORK/LINKAGE
+R15      EQU   15                  WORK/LINKAGE
+*
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+         EJECT
+         IKJCPPL
+         EJECT
+         IKJTCB   LIST=YES                                  *HMD 10/85*
+         EJECT                                              *HMD 10/85*
+         CVT      DSECT=YES,LIST=YES                        *HMD 10/85*
+         EJECT
+         IHAPSA   LIST=YES                                     HD APR88
+         EJECT                                                 HD APR88
+PUTLDS   DSECT
+         DS    18F                      OS SAVE AREA
+PUTAAA   EQU   *
+PUTECB   DS    F                        ECB
+PUTIOPL  DS    4F                       IOPLADS
+PUTBLOK  PUTLINE MF=L
+PUTLEN   DS    H                        LENGTH
+PUTZZZ   DS    H                        RESERVED
+PUTMSG   DS    (MAXMSG)C                MESSAGE TEXT AREA
+         DS    0D
+PUTSIZE  EQU   *-PUTLDS                 SIZE OF PUTLINE PARMS
+         EJECT
+***********************************************************************
+*  SET UP LINKAGE
+***********************************************************************
+         SPACE 1
+EPUTL    CSECT
+         AIF  (NOT &XA).X001                                *HMD 10/85*
+EPUTL    AMODE 31
+.X001    ANOP                                               *HMD 10/85*
+         STM   R14,R12,12(R13)    SAVE CALLERS REGS
+         LR    R12,R15            COPY EPA
+         USING EPUTL,R12          ADDRESSABILITY
+         AIF   (NOT &XA).X002                               *HMD 10/85*
+         GETMAIN RU,              LV=LENGTH                            &
+               LV=PUTSIZE,        STANDARD OS SA PLUS ANY EXTRA        &
+               LOC=RES,SP=0       RELATIVE TO 16MB LINE
+         AGO   .X003                                        *HMD 10/85*
+.X002    ANOP                                               *HMD 10/85*
+         GETMAIN RU,              LV=LENGTH                            &
+               LV=PUTSIZE         STANDARD OS SA PLUS ANY EXTRA
+.X003    ANOP                                               *HMD 10/85*
+         ST    R1,8(,R13)         OUR SAVE AREA POINTER
+         ST    R13,4(,R1)         POINTER TO CALLER'S SAVE AREA
+         LR    R13,R1             @OUR SAVE AREA
+         USING PUTLDS,R13         MAP SA AND WORK AREA
+         L     R14,4(,R13)        POINT TO CALLER'S RSA
+         LM    R0,R1,20(R14)      RESTORE REGS CHANGED BY GETMAIN
+         SPACE 2
+***********************************************************************
+*  UNLOAD ARGUMENTS AND VALIDATE WHERE POSSIBLE
+***********************************************************************
+         SPACE 1
+         LA    R15,RCBA                 RC IF BAD ADDRESS
+         LTR   RMA,R1                   MESSAGE ADDRESS
+         BNP   RETURN                   GOOD ASSUMPTION
+         LA    R15,RCBL                 RC IF BAD LENGTH
+         LTR   RML,R0                   POSITIVE?
+         BNP   RETURN                   -NO
+         C     RML,=A(MAXMSG)           MORE THAN MAX?
+         BH    RETURN                   -YES
+         SPACE 2
+***********************************************************************
+*  BUILD PARAMETER LIST
+***********************************************************************
+         SPACE 1
+         LA    R15,4(,RML)              MESSAGE LENGTH
+         STH   R15,PUTLEN               PLUS HEADER
+         XC    PUTZZZ,PUTZZZ            CLEAR 2ND HWORD OF RDW
+         BCTR  RML,0                    REDUCE FOR MOVE
+         EX    RML,PUTMOVE
+         EJECT
+***********************************************************************
+*  DIG UP ADDRESS OF UPT AND ECT
+***********************************************************************
+         SPACE 1
+         L     R2,PSATOLD-PSA           @TCB                   HD APR88
+         L     R2,TCBFSA-TCB(,R2)       @1ST PROBLEM PGM SAVE AREA
+         L     R2,24(,R2)               REG1 THAT WAS PASSED TO CP
+         USING CPPL,R2                  MAP CPPL
+         L     RUPT,CPPLUPT             @UPT
+         L     RECT,CPPLECT             @ECT
+         SPACE 2
+***********************************************************************
+*  ISSUE PUTLINE CALL
+***********************************************************************
+         SPACE 1
+         XC    PUTECB,PUTECB            CLEAR ECB
+         XC    PUTBLOK(12),PUTBLOK      CLEAR PARM BLOCK       HD APR88
+         PUTLINE PARM=PUTBLOK,          PARAMETER BLOCK                &
+               UPT=(RUPT),              @UPT                           &
+               ECT=(RECT),              @ECT                           &
+               ECB=PUTECB,              @ECB                           &
+               OUTPUT=(PUTLEN,TERM,SINGLE,DATA),                       &
+               MF=(E,PUTIOPL)
+         EJECT
+***********************************************************************
+*  RETURN TO CALLER
+***********************************************************************
+         SPACE 1
+RETURN   EQU   *
+         LR    R2,R13                   @OUR SAVE AREA
+         LR    R3,R15                   SAVE RETURN CODE
+         L     R13,4(,R13)              @CALLER'S SAVE AREA
+         FREEMAIN RU,LV=PUTSIZE,A=(R2),SP=0
+         LR    R15,R3                   RESTORE RC
+         RETURN (14,12),RC=(15)         RESTORE CALLER'S REGS
+         SPACE 5
+***********************************************************************
+*  CONSTANTS AND NON-REENTRANT WORK AREAS
+***********************************************************************
+         SPACE 1
+PUTMOVE  MVC   PUTMSG(*-*),0(RMA)       MOVE MESSAGE TO BUFFER
+         SPACE 2
+         LTORG
+         SPACE 2
+         END   EPUTL

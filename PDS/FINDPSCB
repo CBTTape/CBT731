@@ -1,0 +1,65 @@
+        How to find the PSCB in a TSO address space
+          when you want to run the code in an SRB?
+
+Normally, in your own address space, the PSCB may be found,
+chained off the JSCB.  The JSCB is chained off the TCB.  But
+if you are trying to put this code inside an SRB, when no rmal
+TCB's are running, then you have a problem.
+
+There are several solutions to this problem.
+
+Solution 1.
+
+The PSCB is pointed to by both the JSCB and the LWA.  So one
+solution is to get to it from the LWA, as follows:
+
+*                                  GET TO THE PSCB FROM THE LWA
+         L     R3,X'224'           ASCB
+         L     R3,X'6C'(,R3)       ASXB
+         L     R3,X'14'(,R3)       LWA
+         L     R3,X'18'(,R3)       PSCB
+         LTR   R3,R3               IS THERE A PSCB?
+         BZ    RETURN              NO. CAN'T DO ANYTHING MORE
+*                                  DO MANIPULATIONS WITH PSCB FIELDS
+*                                  HERE, ETCETERA
+RETURN   DS    0H
+
+Solution 2.
+
+Find a TCB that sticks around, so that you can chain a JSCB off of it.
+
+*                                  GET TO THE PSCB FROM ASCBXTCB
+         L     R3,X'224'           ASCB
+         L     R3,X'11C'(,R3)      ASCBXTCB  Use XTCB which is
+*                                  chained off the ASCB.
+         L     R3,X'B4'(,R3)       JSCB
+         L     R3,X'108'(,R3)      PSCB
+         LTR   R3,R3               IS THERE A PSCB?
+         BZ    RETURN              NO. CAN'T DO ANYTHING MORE
+*                                  DO MANIPULATIONS WITH PSCB FIELDS
+*                                  HERE, ETCETERA
+ RETURN   DS    0H
+
+It seems that both of these techniques work, if you want to run your
+code inside of an SRB.
+
+DO NOT USE CODE LIKE THE FOLLOWING, IF YOU WANT TO RUN IT INSIDE OF
+AN SRB:  It is fine to run this code if it is in your own address
+space.
+
+         L     R3,16              CVT
+         L     R3,X'0'(,R3)       TCB WORDS (zeroes when inside an SRB)
+         L     R3,X'4'(,R3)       TCB
+         L     R3,X'B4'(,R3)      JSCB
+         L     R3,X'108'(,R3)     PSCB
+         LTR   R3,R3              IS THERE A PSCB?
+         BZ    RETURN             NO. CAN'T DO ANYTHING MORE
+*                                 DO MANIPULATIONS WITH PSCB FIELDS
+*                                 HERE, ETCETERA
+RETURN   DS    0H
+
+The problem with this code, is that when you are running it inside
+an SRB, then the TCB words point to zeroes, because that TCB doesn't
+exist.  And you're sunk.  You either have to get to the JSCB from a
+TCB that exists, or else you have to point to the PSCB from the LWA.
+
